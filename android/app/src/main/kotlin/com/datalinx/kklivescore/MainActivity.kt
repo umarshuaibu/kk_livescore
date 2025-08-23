@@ -1,4 +1,4 @@
-package com.datalinx.kklivescoreadmin
+package com.datalinx.kklivescore
 
 import io.flutter.embedding.android.FlutterActivity
 

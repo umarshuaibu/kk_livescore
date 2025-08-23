@@ -1,9 +1,55 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:app_links/app_links.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final AppLinks _appLinks = AppLinks();
+  StreamSubscription<Uri>? _linkSubscription;
+
+  // Initialize deep link handling
+  Future<void> initDeepLinks() async {
+    // Handle initial link (app opened from terminated state)
+    final Uri? initialLink = await _appLinks.getInitialAppLink();
+    if (initialLink != null) {
+      await _handleSignInLink(initialLink.toString());
+    }
+
+    // Handle links when app is running
+    _linkSubscription = _appLinks.uriLinkStream.listen(
+      (Uri? uri) async {
+        if (uri != null) {
+          await _handleSignInLink(uri.toString());
+        }
+      },
+      onError: (err) {
+        throw Exception('Error handling deep link: $err');
+      },
+    );
+  }
+
+  // Handle the sign-in link
+  Future<void> _handleSignInLink(String link) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('signInEmail') ?? '';
+      if (email.isEmpty) {
+        throw Exception('No email found for sign-in');
+      }
+      final credential = await verifyEmailLink(email, link);
+      if (credential != null) {
+        // Clear stored email after successful sign-in
+        await prefs.remove('signInEmail');
+      } else {
+        throw Exception('Invalid sign-in link: $link');
+      }
+    } catch (e) {
+      throw Exception('Error handling sign-in link: $e');
+    }
+  }
 
   // Check if email is whitelisted
   Future<bool> isEmailWhitelisted(String email) async {
@@ -31,16 +77,21 @@ class AuthService {
       await _auth.sendSignInLinkToEmail(
         email: email,
         actionCodeSettings: ActionCodeSettings(
-          url: 'https://kk-livescore.firebaseapp.com/finishSignUp',
+          url: 'https://umarshuaibu.github.io/mylivescore-redirect/signin',
           handleCodeInApp: true,
           iOSBundleId: 'com.yourapp.ios',
-          androidPackageName: 'com.kk-livescore.android',
+          androidPackageName: 'com.datalinx.kklivescore',
           androidInstallApp: true,
           androidMinimumVersion: '12',
         ),
       );
+      // Store the email for later use
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('signInEmail', email);
+    } on FirebaseAuthException catch (e) {
+      throw Exception('Failed to send sign-in link: ${e.code} - ${e.message}');
     } catch (e) {
-      throw Exception('Failed to send sign-in link: $e');
+      throw Exception('Unexpected error: $e');
     }
   }
 
@@ -83,7 +134,7 @@ class AuthService {
     }
   }
 
-  // 🔹 New method: sign in with email & password
+  // Sign in with email & password
   Future<UserCredential> signInWithEmailAndPassword(
       String email, String password) async {
     try {
@@ -103,5 +154,10 @@ class AuthService {
     } catch (e) {
       throw Exception('Failed to sign out: $e');
     }
+  }
+
+  // Clean up deep link subscription
+  void dispose() {
+    _linkSubscription?.cancel();
   }
 }

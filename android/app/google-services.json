@@ -23,25 +23,6 @@
           "other_platform_oauth_client": []
         }
       }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:381124619618:android:3cfdb187a0149ae77f103b",
-        "android_client_info": {
-          "package_name": "com.datalinx.kklivescoreadmin"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyBJwXS7gsXM6c0p-tz1ohoTLL8j64EMcvM"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
     }
   ],
   "configuration_version": "1"

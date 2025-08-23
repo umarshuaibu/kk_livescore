@@ -10,7 +10,7 @@ plugins {
 }
 
 android {
-    namespace = "com.datalinx.kklivescoreadmin"
+    namespace = "com.datalinx.kklivescore"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -46,6 +46,8 @@ android {
 dependencies {
   // Import the Firebase BoM
   implementation(platform("com.google.firebase:firebase-bom:34.1.0"))
+  implementation("com.google.firebase:firebase-auth")
+  implementation("com.google.firebase:firebase-firestore")
   implementation("androidx.window:window:1.0.0")
   implementation("androidx.window:window-java:1.0.0")
 
