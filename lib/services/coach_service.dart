@@ -12,8 +12,10 @@ class CoachService {
       final newCoach = Coach(
         id: docRef.id,
         name: coach.name,
-        team: coach.team,
+        teamId: coach.teamId,
+        teamName: coach.teamName,
         photoUrl: coach.photoUrl,
+        dateOfBirth: coach.dateOfBirth, // ✅ include DOB
       );
       await docRef.set(newCoach.toMap());
     } catch (e) {
@@ -21,12 +23,15 @@ class CoachService {
     }
   }
 
+
+
   // Fetch all coaches with optional limit
   Future<List<Coach>> fetchCoaches({int limit = 0}) async {
     try {
       QuerySnapshot snapshot = limit > 0
           ? await _firestore.collection(_collection).limit(limit).get()
           : await _firestore.collection(_collection).get();
+
       return snapshot.docs
           .map((doc) => Coach.fromMap(doc.data() as Map<String, dynamic>))
           .toList();
@@ -47,7 +52,10 @@ class CoachService {
   // Edit a coach by ID
   Future<void> editCoach(String id, Coach updatedCoach) async {
     try {
-      await _firestore.collection(_collection).doc(id).update(updatedCoach.toMap());
+      await _firestore
+          .collection(_collection)
+          .doc(id)
+          .update(updatedCoach.toMap());
     } catch (e) {
       throw Exception('Failed to edit coach: $e');
     }
@@ -61,5 +69,23 @@ class CoachService {
         .map((snapshot) => snapshot.docs
             .map((doc) => Coach.fromMap(doc.data()))
             .toList());
+  }
+
+  // Filter coaches by name (case-insensitive prefix search)
+  Future<List<Coach>> filterCoachesByName(String name) async {
+    try {
+      final query = name.toLowerCase();
+      final snapshot = await _firestore
+          .collection(_collection)
+          .where('name', isGreaterThanOrEqualTo: query)
+          .where('name', isLessThanOrEqualTo: '$query\uf8ff')
+          .get();
+
+      return snapshot.docs
+          .map((doc) => Coach.fromMap(doc.data()))
+          .toList();
+    } catch (e) {
+      throw Exception('Failed to filter coaches: $e');
+    }
   }
 }

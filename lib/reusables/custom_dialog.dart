@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+enum DialogType { success, warning, error }
+
 class CustomDialog extends StatelessWidget {
   final String title;
   final String message;
@@ -7,6 +9,7 @@ class CustomDialog extends StatelessWidget {
   final String cancelText;
   final VoidCallback? onConfirm;
   final VoidCallback? onCancel;
+  final DialogType? type; // ✅ new field
 
   const CustomDialog({
     super.key,
@@ -16,6 +19,7 @@ class CustomDialog extends StatelessWidget {
     this.cancelText = "Cancel",
     this.onConfirm,
     this.onCancel,
+    this.type,
   });
 
   /// This helper makes it easier to show the dialog
@@ -27,6 +31,7 @@ class CustomDialog extends StatelessWidget {
     String cancelText = "Cancel",
     VoidCallback? onConfirm,
     VoidCallback? onCancel,
+    DialogType? type,
   }) {
     return showDialog(
       context: context,
@@ -37,8 +42,36 @@ class CustomDialog extends StatelessWidget {
         cancelText: cancelText,
         onConfirm: onConfirm,
         onCancel: onCancel,
+        type: type,
       ),
     );
+  }
+
+  // ✅ helper to get icon & color
+  IconData? _getIcon() {
+    switch (type) {
+      case DialogType.success:
+        return Icons.check_circle;
+      case DialogType.warning:
+        return Icons.warning;
+      case DialogType.error:
+        return Icons.error;
+      default:
+        return null;
+    }
+  }
+
+  Color? _getIconColor() {
+    switch (type) {
+      case DialogType.success:
+        return Colors.green;
+      case DialogType.warning:
+        return Colors.amber;
+      case DialogType.error:
+        return Colors.red;
+      default:
+        return null;
+    }
   }
 
   @override
@@ -50,6 +83,14 @@ class CustomDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (_getIcon() != null) ...[
+              Icon(
+                _getIcon(),
+                size: 48,
+                color: _getIconColor(),
+              ),
+              const SizedBox(height: 10),
+            ],
             Text(
               title,
               style: const TextStyle(

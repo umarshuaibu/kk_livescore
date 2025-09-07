@@ -23,6 +23,7 @@ class TeamInfoCard extends StatelessWidget {
         await teamService.deleteTeam(team.id);
         navigator.pop(); // Close the confirmation dialog
         await CustomDialog.show(
+          // ignore: use_build_context_synchronously
           context,
           title: 'Success',
           message: 'Team deleted successfully',

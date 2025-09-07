@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:kklivescoreadmin/screens/player_list_screen.dart';
+import 'package:kklivescoreadmin/screens/team_list_screen.dart';
 import 'package:kklivescoreadmin/screens/coach_list_screen.dart';
 import 'admins/app_manager/admin_login.dart';
 import 'firebase_options.dart';
-import 'admins/app_manager/admin_dashboard.dart';
+import 'admins/app_manager/admin_panel.dart';
 import 'package:app_links/app_links.dart';
 import 'screens/create_team_screen.dart';
 import 'screens/create_coach_screen.dart';
@@ -32,47 +33,65 @@ class MyApp extends StatelessWidget {
         },
       ),
       GoRoute(
-        path: '/admin_dashboard',
+        path: '/admin_panel',
         builder: (context, state) {
-          return AdminDashboard();
+          return AdminPanel();
         },
       ),
 
       GoRoute(
-        path: '/screens/playerlist',
+        path: '/',
+        builder: (context, state) {
+          return AdminPanel();
+        },
+      ),
+     GoRoute(
+        path: '/create_team',
+        builder: (context, state) {
+          return CreateTeamScreen();
+        },
+      ),
+      GoRoute(
+        path: '/create_player',
+        builder: (context, state) {
+          return CreatePlayerScreen();
+        },
+      ),
+              GoRoute(
+        path: '/create_coach',
+        builder: (context, state) {
+          return CreateCoachScreen();
+        },
+      ),
+            GoRoute(
+        path: '/player_list',
         builder: (context, state) {
           return PlayerListScreen();
         },
       ),
 
       GoRoute(
-        path: '/screens/coachlist',
+        path: '/coach_list',
         builder: (context, state) {
           return CoachListScreen();
         },
       ),
       GoRoute(
-        path: '/screens/create_team',
+        path: '/team_list',
         builder: (context, state) {
-          return CreateTeamScreen();
+          return TeamListScreen();
         },
       ),
       GoRoute(
-        path: '/screens/create_player',
+        path: '/reusables/edit_player',
         builder: (context, state) {
           return CreatePlayerScreen();
-        },
-      ),
-        GoRoute(
-        path: '/screens/create_coach',
-        builder: (context, state) {
-          return CreateCoachScreen();
         },
       ),
 
     ],
     //initialLocation: '/admin_login_screen',
-    initialLocation: '/admin_dashboard',
+    initialLocation: '/admin_panel',
   );
 
   MyApp({super.key}) {

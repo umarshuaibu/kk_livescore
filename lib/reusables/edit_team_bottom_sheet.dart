@@ -1,10 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:multi_select_flutter/multi_select_flutter.dart'; // ✅ NEW
 import '/reusables/constants.dart'; // Adjust import path
 import '../models/team_model.dart';
 import '../models/player_model.dart';
@@ -54,14 +54,16 @@ class _EditTeamBottomSheetState extends State<EditTeamBottomSheet> {
   Future<void> _fetchAvailablePlayers() async {
     final snapshot = await _playerService.fetchPlayers();
     setState(() {
-      _availablePlayers.addAll(snapshot.where((player) => player.team == null || player.team == widget.team.id));
+      _availablePlayers.addAll(snapshot.where((player) =>
+          player.team == null || player.team == widget.team.id));
     });
   }
 
   Future<void> _fetchAvailableCoaches() async {
     final snapshot = await _coachService.fetchCoaches();
     setState(() {
-      _availableCoaches.addAll(snapshot.where((coach) => coach.team == null || coach.team == widget.team.id));
+      _availableCoaches.addAll(snapshot); // Include all coaches
+      // Filter only unassigned coaches or coaches assigned to this team
     });
   }
 
@@ -110,13 +112,16 @@ class _EditTeamBottomSheetState extends State<EditTeamBottomSheet> {
   }
 
   Future<String> _uploadImage(File image) async {
-    final ref = _storage.ref().child('teams/${DateTime.now().millisecondsSinceEpoch}.jpg');
+    final ref = _storage
+        .ref()
+        .child('teams/${DateTime.now().millisecondsSinceEpoch}.jpg');
     await ref.putFile(image);
     return await ref.getDownloadURL();
   }
 
   void _saveChanges() async {
-    if (_formKey.currentState!.validate() && (_logoUrl != widget.team.logoUrl || _imageFile != null)) {
+    if (_formKey.currentState!.validate() &&
+        (_logoUrl != widget.team.logoUrl || _imageFile != null)) {
       try {
         String newLogoUrl = _logoUrl ?? '';
         if (_imageFile != null) {
@@ -143,7 +148,8 @@ class _EditTeamBottomSheetState extends State<EditTeamBottomSheet> {
       }
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all fields or update the logo')),
+        const SnackBar(
+            content: Text('Please fill all fields or update the logo')),
       );
     }
   }
@@ -174,13 +180,15 @@ class _EditTeamBottomSheetState extends State<EditTeamBottomSheet> {
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(labelText: 'Name'),
-                  validator: (value) => value!.isEmpty ? 'Please enter a name' : null,
+                  validator: (value) =>
+                      value!.isEmpty ? 'Please enter a name' : null,
                 ),
                 const SizedBox(height: 20),
                 TextFormField(
                   controller: _abbrController,
                   decoration: const InputDecoration(labelText: 'Abbreviation'),
-                  validator: (value) => value!.isEmpty ? 'Please enter an abbreviation' : null,
+                  validator: (value) =>
+                      value!.isEmpty ? 'Please enter an abbreviation' : null,
                 ),
                 const SizedBox(height: 20),
                 GestureDetector(
@@ -191,7 +199,11 @@ class _EditTeamBottomSheetState extends State<EditTeamBottomSheet> {
                       decoration: InputDecoration(
                         labelText: 'Team Logo',
                         suffixIcon: const Icon(Icons.camera_alt),
-                        errorText: _imageFile == null && (widget.team.logoUrl == null || widget.team.logoUrl!.isEmpty) ? 'Please select a logo' : null,
+                        errorText: _imageFile == null &&
+                                (widget.team.logoUrl == null ||
+                                    widget.team.logoUrl!.isEmpty)
+                            ? 'Please select a logo'
+                            : null,
                       ),
                     ),
                   ),
@@ -203,40 +215,48 @@ class _EditTeamBottomSheetState extends State<EditTeamBottomSheet> {
                   items: _availableCoaches.map((coach) {
                     return DropdownMenuItem<String>(
                       value: coach.id,
-                      child: Text(coach.name),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedCoachId = value;
-                    });
-                  },
-                ),
-                const SizedBox(height: 20),
-                DropdownButtonFormField<List<String>>(
-                  value: _selectedPlayerIds.isNotEmpty ? _selectedPlayerIds : null,
-                  hint: const Text('Select Players'),
-                  items: _availablePlayers.map((player) {
-                    return DropdownMenuItem<List<String>>(
-                      value: [player.id],
-                      child: Text(player.name),
+                      enabled: coach.teamId == null, // Only coaches with null teamId are clickable
+                      child: Opacity(
+                        opacity: coach.teamId == null ? 1.0 : 0.5, // Full opacity for clickable, low opacity for non-clickable
+                        child: Text(coach.name),
+                      ),
                     );
                   }).toList(),
                   onChanged: (value) {
                     if (value != null) {
                       setState(() {
-                        _selectedPlayerIds = value;
+                        _selectedCoachId = value;
                       });
                     }
                   },
-                  selectedItemBuilder: (context) {
-                    return _selectedPlayerIds.map((id) {
-                      final player = _availablePlayers.firstWhere((p) => p.id == id);
-                      return Text(player.name);
-                    }).toList();
-                  },
-                  multiple: true, // Enable multiple selection
+                  validator: (value) => null, // coachId is nullable, no validation required
                 ),
+                const SizedBox(height: 20),
+
+                /// ✅ Multi-select for players
+                MultiSelectDialogField<String>(
+                  items: _availablePlayers
+                      .map((player) =>
+                          MultiSelectItem<String>(player.id, player.name))
+                      .toList(),
+                  title: const Text("Select Players"),
+                  buttonText: const Text("Select Players"),
+                  searchable: true,
+                  listType: MultiSelectListType.LIST,
+                  initialValue: _selectedPlayerIds,
+                  onConfirm: (values) {
+                    setState(() {
+                      _selectedPlayerIds = values;
+                    });
+                  },
+                  validator: (values) {
+                    if (values == null || values.isEmpty) {
+                      return "Please select at least one player";
+                    }
+                    return null;
+                  },
+                ),
+
                 const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,

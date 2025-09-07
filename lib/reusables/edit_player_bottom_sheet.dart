@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '/reusables/constants.dart'; // Adjust import path
 import '../../models/player_model.dart';
 import '../../services/player_service.dart';
+import '../reusables/custom_dialog.dart'; // Updated import
 
 class EditPlayerBottomSheet extends StatefulWidget {
   final Player player;
@@ -26,6 +27,7 @@ class _EditPlayerBottomSheetState extends State<EditPlayerBottomSheet> {
   String? _selectedTeam;
   File? _imageFile;
   String? _photoUrl;
+  DateTime? _selectedDob; // ✅ New state for DOB
 
   final List<String> _positions = ['Goalkeeper', 'Defender', 'Midfielder', 'Forward'];
   final List<String> _teams = [];
@@ -42,14 +44,28 @@ class _EditPlayerBottomSheetState extends State<EditPlayerBottomSheet> {
     _selectedPosition = widget.player.position;
     _selectedTeam = widget.player.team;
     _photoUrl = widget.player.playerPhoto;
+    _selectedDob = widget.player.dateOfBirth; // ✅ Pre-fill DOB
     _fetchTeams();
   }
 
   Future<void> _fetchTeams() async {
-    final snapshot = await FirebaseFirestore.instance.collection('teams').get();
-    setState(() {
-      _teams.addAll(snapshot.docs.map((doc) => doc['name'] as String));
-    });
+    try {
+      final snapshot = await FirebaseFirestore.instance.collection('teams').get();
+      if (mounted) {
+        setState(() {
+          _teams.addAll(snapshot.docs.map((doc) => doc['name'] as String));
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        CustomDialog.show(
+          context,
+          title: 'Error',
+          message: 'Failed to fetch teams: $e',
+          type: DialogType.error,
+        );
+      }
+    }
   }
 
   Future<bool> _requestPermission() async {
@@ -72,8 +88,11 @@ class _EditPlayerBottomSheetState extends State<EditPlayerBottomSheet> {
         }
       }
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permission denied for image access')),
+      CustomDialog.show(
+        context,
+        title: 'Permission Denied',
+        message: 'Permission denied for image access. Please allow access in settings.',
+        type: DialogType.error,
       );
     }
   }
@@ -97,15 +116,33 @@ class _EditPlayerBottomSheetState extends State<EditPlayerBottomSheet> {
   }
 
   Future<String> _uploadImage(File image) async {
-    final ref = _storage.ref().child('players/${DateTime.now().millisecondsSinceEpoch}.jpg');
-    await ref.putFile(image);
-    return await ref.getDownloadURL();
+    try {
+      final ref = _storage.ref().child('players/${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await ref.putFile(image);
+      return await ref.getDownloadURL();
+    } catch (e) {
+      throw Exception('Failed to upload image: $e');
+    }
+  }
+
+  Future<void> _pickDob() async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: _selectedDob ?? DateTime(2000, 1, 1),
+      firstDate: DateTime(1950),
+      lastDate: DateTime.now(),
+    );
+    if (pickedDate != null && mounted) {
+      setState(() {
+        _selectedDob = pickedDate;
+      });
+    }
   }
 
   void _saveChanges() async {
-    if (_formKey.currentState!.validate() && (widget.player.playerPhoto != _photoUrl || _imageFile != null)) {
+    if (_formKey.currentState!.validate() && _selectedDob != null && _selectedPosition != null && _selectedTeam != null) {
       try {
-        String newPhotoUrl = _photoUrl!;
+        String newPhotoUrl = _photoUrl ?? '';
         if (_imageFile != null) {
           newPhotoUrl = await _uploadImage(_imageFile!);
         }
@@ -114,23 +151,36 @@ class _EditPlayerBottomSheetState extends State<EditPlayerBottomSheet> {
           name: _nameController.text,
           position: _selectedPosition!,
           jerseyNo: int.parse(_jerseyNoController.text),
-          team: _selectedTeam,
+          team: _selectedTeam!,
           playerPhoto: newPhotoUrl,
+          dateOfBirth: _selectedDob!, // ✅ Include DOB
         );
         await _playerService.editPlayer(widget.player.id, updatedPlayer);
         if (mounted) {
           Navigator.pop(context); // Close the bottom sheet
+          CustomDialog.show(
+            context,
+            title: 'Success',
+            message: 'Player updated successfully!',
+            type: DialogType.success,
+          );
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error updating player: $e')),
+          CustomDialog.show(
+            context,
+            title: 'Error',
+            message: 'Failed to update player: $e',
+            type: DialogType.error,
           );
         }
       }
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all fields or update the photo')),
+      CustomDialog.show(
+        context,
+        title: 'Validation Error',
+        message: 'Please fill all required fields, including Date of Birth, Position, and Team',
+        type: DialogType.error,
       );
     }
   }
@@ -177,7 +227,9 @@ class _EditPlayerBottomSheetState extends State<EditPlayerBottomSheet> {
                       decoration: InputDecoration(
                         labelText: 'Player Photo',
                         suffixIcon: const Icon(Icons.camera_alt),
-                        errorText: _imageFile == null && widget.player.playerPhoto.isEmpty ? 'Please select a photo' : null,
+                        errorText: _imageFile == null && (widget.player.playerPhoto.isEmpty)
+                            ? 'Please select a photo'
+                            : null,
                       ),
                     ),
                   ),
@@ -192,9 +244,11 @@ class _EditPlayerBottomSheetState extends State<EditPlayerBottomSheet> {
                     );
                   }).toList(),
                   onChanged: (value) {
-                    setState(() {
-                      _selectedPosition = value;
-                    });
+                    if (mounted) {
+                      setState(() {
+                        _selectedPosition = value;
+                      });
+                    }
                   },
                   validator: (value) => value == null ? 'Please select a position' : null,
                 ),
@@ -208,10 +262,30 @@ class _EditPlayerBottomSheetState extends State<EditPlayerBottomSheet> {
                     );
                   }).toList(),
                   onChanged: (value) {
-                    setState(() {
-                      _selectedTeam = value;
-                    });
+                    if (mounted) {
+                      setState(() {
+                        _selectedTeam = value;
+                      });
+                    }
                   },
+                  validator: (value) => value == null ? 'Please select a team' : null,
+                ),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: _pickDob,
+                  child: AbsorbPointer(
+                    child: TextFormField(
+                      enabled: false,
+                      decoration: InputDecoration(
+                        labelText: 'Date of Birth',
+                        hintText: _selectedDob == null
+                            ? 'Select date of birth'
+                            : '${_selectedDob!.day}/${_selectedDob!.month}/${_selectedDob!.year}',
+                        suffixIcon: const Icon(Icons.calendar_today),
+                      ),
+                      validator: (_) => _selectedDob == null ? 'Please select a date of birth' : null,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 20),
                 Row(
