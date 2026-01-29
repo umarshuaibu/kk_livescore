@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:kklivescoreadmin/admins/app_manager/admin_body_view.dart';
 import 'package:kklivescoreadmin/admins/app_manager/dashboard_overview.dart';
@@ -23,6 +24,8 @@ class _DashboardPageState extends State<DashboardPage> {
   AdminBodyView _activeBodyView = AdminBodyView.dashboard;
   Player? _selectedPlayer;
 
+
+
   // ================= NAVIGATION HANDLER =================
   void _handleDashboardNavigation(
     AdminBodyView view, {
@@ -33,6 +36,40 @@ class _DashboardPageState extends State<DashboardPage> {
       _selectedPlayer = player;
     });
   }
+
+Future<void> signOut(BuildContext context) async {
+  try {
+    // 1️⃣ Show a loading indicator to prevent multiple taps
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    // 2️⃣ Sign out from Firebase
+    await FirebaseAuth.instance.signOut();
+
+    // 3️⃣ Navigate to your login screen (replace with your actual login screen widget)
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const DashboardPage ()),
+      (route) => false,
+    );
+  } catch (_) {
+    // Show a generic error message
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Unable to sign out. Please try again.'),
+      ),
+    );
+  } finally {
+    // 4️⃣ Close the loading dialog if it is still open
+    if (Navigator.canPop(context)) Navigator.of(context).pop();
+  }
+}
+
+
 
   // ================= MAIN BODY RESOLVER =================
   Widget _resolveMainBody() {
@@ -145,9 +182,10 @@ class _DashboardPageState extends State<DashboardPage> {
 
                   const Spacer(),
                   const Divider(color: Colors.white24),
-                  _sidebarItem(Icons.logout, "Logout", () {
-                    // TODO: FirebaseAuth.instance.signOut()
-                  }),
+                 _sidebarItem(Icons.logout, "Logout", () {
+  signOut(context); // Call the cleaned-up function
+}),
+
                   const SizedBox(height: 16),
                 ],
               ),
@@ -164,6 +202,10 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
+
+
+
+
 
   // ================= SIDEBAR ITEM =================
   Widget _sidebarItem(
