@@ -1,4 +1,4 @@
-package com.datalinx.kklivescore
+package com.datalinx.kklivescore.fans
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1,1 +1,35 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"kk-livescore","appId":"1:381124619618:android:eb39d6d77e6206b07f103b","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"kk-livescore","configurations":{"android":"1:381124619618:android:eb39d6d77e6206b07f103b"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "kk-livescore",
+          "appId": "1:381124619618:android:eb39d6d77e6206b07f103b",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "kk-livescore",
+          "configurations": {
+            "web": "1:381124619618:web:af4d8a2c61bb0f937f103b"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

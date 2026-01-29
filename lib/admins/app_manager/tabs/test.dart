@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../../../reusables/constants.dart'; // Adjusted import path
-import '../../../services/player_service.dart';
-import '../../../services/team_service.dart';
-import '../../../services/coach_service.dart';
+import '../../management/reusables/constants.dart'; // Adjusted import path
+import '../../management/services/player_service.dart';
+import '../../management/services/team_service.dart';
+import '../../management/services/coach_service.dart';
 /*import '../../services/league_service.dart';
 import '../../services/transfer_service.dart';
 import '../../services/news_service.dart';*/

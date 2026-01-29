@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../services/auth_service.dart';
-import '../../reusables/constants.dart';
+import '../management/services/auth_service.dart';
+import '../management/reusables/constants.dart';
 
 class AppManagerLoginScreen extends StatefulWidget {
   final String? token; // Token from deep link

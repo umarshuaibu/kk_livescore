@@ -1,130 +1,191 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
-import 'package:kklivescoreadmin/admins/app_manager/tabs/dashboard_tab.dart';
-import '../../reusables/constants.dart'; // Adjusted import path
-//import '../../screens/matches_category_screen.dart';
-//import '../../screens/transfers_screen.dart';
-import '../../reusables/custom_dialog.dart'; // Import CustomDialog
+import 'package:kklivescoreadmin/admins/app_manager/admin_body_view.dart';
+import 'package:kklivescoreadmin/admins/app_manager/dashboard_overview.dart';
+import 'package:kklivescoreadmin/admins/management/models/player_model.dart';
+import 'package:kklivescoreadmin/admins/management/screens/coach_list_screen.dart';
+import 'package:kklivescoreadmin/admins/management/screens/create_player_screen.dart';
+import 'package:kklivescoreadmin/admins/management/screens/edit_player_screen.dart';
+import 'package:kklivescoreadmin/admins/management/screens/player_list_screen.dart';
+import 'package:kklivescoreadmin/admins/management/screens/team_list_screen.dart';
+import 'package:kklivescoreadmin/admins/management/screens/transfer_list_screen.dart';
+import 'package:kklivescoreadmin/constants/colors.dart';
+import 'package:kklivescoreadmin/league_manager/league_list_screen.dart';
+import 'package:kklivescoreadmin/league_manager/live_updater/match_selector_screen.dart';
 
-class AdminPanel extends StatefulWidget {
-  const AdminPanel({super.key});
+class DashboardPage extends StatefulWidget {
+  const DashboardPage({super.key});
 
   @override
-  State<AdminPanel> createState() => _AdminPanelState();
+  State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _AdminPanelState extends State<AdminPanel> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  int _selectedIndex = 0; // For bottom navigation
+class _DashboardPageState extends State<DashboardPage> {
+  AdminBodyView _activeBodyView = AdminBodyView.dashboard;
+  Player? _selectedPlayer;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 3, vsync: this); // 3 tabs: Dashboard, Live Update, News
+  // ================= NAVIGATION HANDLER =================
+  void _handleDashboardNavigation(
+    AdminBodyView view, {
+    Player? player,
+  }) {
+    setState(() {
+      _activeBodyView = view;
+      _selectedPlayer = player;
+    });
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
+  // ================= MAIN BODY RESOLVER =================
+  Widget _resolveMainBody() {
+    switch (_activeBodyView) {
+      case AdminBodyView.dashboard:
+        return DashboardOverview(
+          key: const ValueKey('dashboard'),
+          onNavigate: _handleDashboardNavigation,
+        );
 
-  Widget _getTabContent(int index) {
-    switch (index) {
-      case 0:
-        return DashboardTab(); // for Dashboard
-      case 1:
-        return Container(); // Placeholder for Live Update
-      case 2:
-        return Container(); // Placeholder for News
+      case AdminBodyView.players:
+        return PlayerListScreen(
+          key: const ValueKey('players'),
+          onNavigate: _handleDashboardNavigation,
+        );
+
+      case AdminBodyView.createPlayer:
+        return CreatePlayerScreen(
+          key: const ValueKey('create_player'),
+          onDone: () =>
+              _handleDashboardNavigation(AdminBodyView.players),
+        );
+
+      case AdminBodyView.editPlayer:
+        if (_selectedPlayer == null) {
+          return const Center(child: Text('No player selected'));
+        }
+        return EditPlayerScreen(
+          key: const ValueKey('edit_player'),
+          playerId: _selectedPlayer!.id,
+          onDone: () =>
+              _handleDashboardNavigation(AdminBodyView.players),
+        );
+
+      case AdminBodyView.teams:
+        return TeamListScreen(key: ValueKey('teams'));
+
+      case AdminBodyView.transfers:
+        return TransferListScreen(key: ValueKey('transfers'));
+
+      case AdminBodyView.coaches:
+        return CoachListScreen(key: ValueKey('coaches'));
+
+      case AdminBodyView.liveMatchUpdater:
+        return const MatchSelectorScreen(key: ValueKey('live_matches'));
+        
+              case AdminBodyView.leagues:
+        return const LeagueListScreen(key: ValueKey('Leagues_list'));
+
+      case AdminBodyView.news:
+        return const LeagueListScreen(key: ValueKey('news'));
+
       default:
         return const SizedBox.shrink();
     }
   }
 
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-    if (index == 0) {
-      // Navigate to AdminPanel (current screen)
-      context.go('/admin_panel');
-    } else if (index == 1) {
-      // Show exit confirmation dialog
-      CustomDialog.show(
-        context,
-        title: 'Exit Confirmation',
-        message: 'Are you sure you want to exit the app?',
-        confirmText: 'OK',
-        cancelText: 'Cancel',
-        onConfirm: () {
-          SystemNavigator.pop(); // Exit app
-        },
-        onCancel: () {}, // No action on cancel, just close dialog
-      );
-    }
-  }
-
+  // ================= UI =================
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width >= 1024;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Admin Panel', style: AppTextStyles.headingStyle),
-        backgroundColor: AppColors.primaryColor,
-        foregroundColor: AppColors.whiteColor,
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: false, // Enable scrolling if needed
-          indicator: const UnderlineTabIndicator(
-            borderSide: BorderSide(width: 2.0, color: AppColors.whiteColor),
+      backgroundColor: kSecondaryColor,
+      body: Row(
+        children: [
+          // ================= SIDEBAR =================
+          if (isDesktop)
+            Container(
+              width: 240,
+              decoration: BoxDecoration(
+                color: kPrimaryColor,
+                boxShadow: const [
+                  BoxShadow(color: kScaffoldColor, blurRadius: 6),
+                ],
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 24),
+                  const Text(
+                    "KK LIVESCORE",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+
+                  _sidebarItem(Icons.dashboard, "Dashboard",
+                      () => _handleDashboardNavigation(AdminBodyView.dashboard)),
+
+                  _sidebarItem(Icons.sports_soccer, "Live Matches",
+                      () => _handleDashboardNavigation(AdminBodyView.liveMatchUpdater)),
+
+                  _sidebarItem(Icons.article, "News",
+                      () => _handleDashboardNavigation(AdminBodyView.news)),
+
+                  _sidebarItem(Icons.group, "Teams",
+                      () => _handleDashboardNavigation(AdminBodyView.teams)),
+
+                  _sidebarItem(Icons.people, "Players",
+                      () => _handleDashboardNavigation(AdminBodyView.players)),
+
+                  _sidebarItem(Icons.swap_horiz, "Transfers",
+                      () => _handleDashboardNavigation(AdminBodyView.transfers)),
+
+                  _sidebarItem(Icons.people, "Coaches",
+                      () => _handleDashboardNavigation(AdminBodyView.coaches)),
+
+                  const Spacer(),
+                  const Divider(color: Colors.white24),
+                  _sidebarItem(Icons.logout, "Logout", () {
+                    // TODO: FirebaseAuth.instance.signOut()
+                  }),
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+
+          // ================= MAIN CONTENT =================
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              child: _resolveMainBody(),
+            ),
           ),
-          labelColor: AppColors.whiteColor,
-          unselectedLabelColor: AppColors.secondaryColor, // Assuming grey for unselected
-          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 14),
-          tabs: const [
-            Tab(
-              icon: Icon(Icons.dashboard),
-              text: 'Dashboard',
-            ),
-            Tab(
-              icon: Icon(Icons.live_tv),
-              text: 'Live Update',
-            ),
-            Tab(
-              icon: Icon(Icons.newspaper),
-              text: 'Publish News',
+        ],
+      ),
+    );
+  }
+
+  // ================= SIDEBAR ITEM =================
+  Widget _sidebarItem(
+      IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.white70, size: 18),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+              ),
             ),
           ],
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _getTabContent(0),
-          _getTabContent(1),
-          _getTabContent(2),
-        ],
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-        selectedItemColor: AppColors.primaryColor,
-        unselectedItemColor: AppColors.primaryColor,
-        selectedIconTheme: const IconThemeData(color: AppColors.secondaryColor),
-        unselectedIconTheme: const IconThemeData(color: AppColors.primaryColor),
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.exit_to_app),
-            label: 'Exit',
-          ),
-        ],
       ),
     );
   }

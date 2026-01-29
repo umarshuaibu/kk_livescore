@@ -1,130 +1,223 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:kklivescoreadmin/screens/player_list_screen.dart';
-import 'package:kklivescoreadmin/screens/team_list_screen.dart';
-import 'package:kklivescoreadmin/screens/coach_list_screen.dart';
-import 'admins/app_manager/admin_login.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:kklivescoreadmin/admins/management/models/player_model.dart';
+import 'package:kklivescoreadmin/admins/management/screens/edit_coach_screen.dart';
+import 'package:kklivescoreadmin/admins/management/screens/edit_player_screen.dart';
+import 'package:kklivescoreadmin/admins/management/screens/edit_team_screen.dart';
+
 import 'firebase_options.dart';
+
+// ===== AUTH =====
+import 'admins/auth_screen.dart';
+
+// ===== ADMIN CORE =====
 import 'admins/app_manager/admin_panel.dart';
-import 'package:app_links/app_links.dart';
-import 'screens/create_team_screen.dart';
-import 'screens/create_coach_screen.dart';
-import 'screens/create_player_screen.dart';
-// ignore: unused_import
-import 'dart:async';
+
+// ===== MANAGEMENT =====
+import 'admins/management/screens/create_team_screen.dart';
+import 'admins/management/screens/create_player_screen.dart';
+import 'admins/management/screens/create_coach_screen.dart';
+import 'admins/management/screens/player_list_screen.dart';
+import 'admins/management/screens/team_list_screen.dart';
+import 'admins/management/screens/coach_list_screen.dart';
+import 'admins/management/screens/player_transfer_screen.dart';
+import 'admins/management/screens/transfer_list_screen.dart';
+
+// ===== LEAGUE =====
+import 'league_manager/create_league_screen.dart';
+import 'league_manager/league_list_screen.dart';
+import 'league_manager/live_updater/match_selector_screen.dart';
+
+// ===== PUBLIC =====
+import 'fans/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  final GoRouter _router = GoRouter(
-    routes: [
-      GoRoute(
-        path: '/admin_login_screen',
-        builder: (context, state) {
-          final token = state.uri.queryParameters['token'];
-          return AppManagerLoginScreen(token: token);
-        },
-      ),
-      GoRoute(
-        path: '/admin_panel',
-        builder: (context, state) {
-          return AdminPanel();
-        },
-      ),
+  const MyApp({super.key});
 
-      GoRoute(
-        path: '/',
-        builder: (context, state) {
-          return AdminPanel();
-        },
-      ),
-     GoRoute(
-        path: '/create_team',
-        builder: (context, state) {
-          return CreateTeamScreen();
-        },
-      ),
-      GoRoute(
-        path: '/create_player',
-        builder: (context, state) {
-          return CreatePlayerScreen();
-        },
-      ),
-              GoRoute(
-        path: '/create_coach',
-        builder: (context, state) {
-          return CreateCoachScreen();
-        },
-      ),
-            GoRoute(
-        path: '/player_list',
-        builder: (context, state) {
-          return PlayerListScreen();
-        },
-      ),
-
-      GoRoute(
-        path: '/coach_list',
-        builder: (context, state) {
-          return CoachListScreen();
-        },
-      ),
-      GoRoute(
-        path: '/team_list',
-        builder: (context, state) {
-          return TeamListScreen();
-        },
-      ),
-      GoRoute(
-        path: '/reusables/edit_player',
-        builder: (context, state) {
-          return CreatePlayerScreen();
-        },
-      ),
-
-    ],
-    //initialLocation: '/admin_login_screen',
-    initialLocation: '/admin_panel',
-  );
-
-  MyApp({super.key}) {
-    final appLinks = AppLinks();
-    appLinks.getInitialAppLink().then((Uri? uri) {
-      if (uri != null) {
-        _handleDeepLink(uri);
-      }
-    });
-    appLinks.uriLinkStream.listen((Uri? uri) {
-      if (uri != null) {
-        _handleDeepLink(uri);
-      }
-    });
-  }
-
-  void _handleDeepLink(Uri uri) {
-    debugPrint('Deep link received: $uri');
-    if (uri.path == '/admin_login_screen') {
-      _router.go('/app_manager_login_screen${uri.query.isNotEmpty ? '?${uri.query}' : ''}');
-    } else {
-      _router.go('/admin_login_screen');
-    }
-  }
+  static final FirebaseAuth _auth = FirebaseAuth.instance;
 
   @override
   Widget build(BuildContext context) {
+    final GoRouter router = GoRouter(
+      debugLogDiagnostics: true,
+
+      refreshListenable: GoRouterRefreshStream(
+        _auth.authStateChanges(),
+      ),
+
+      // 🔐 AUTH REDIRECT
+      redirect: (context, state) {
+        final user = _auth.currentUser;
+        final isLoggingIn = state.matchedLocation == '/admin_login';
+
+        const publicRoutes = ['/public_test'];
+
+        if (publicRoutes.contains(state.matchedLocation)) {
+          return null;
+        }
+
+        if (user == null) {
+          return isLoggingIn ? null : '/admin_login';
+        }
+
+        if (isLoggingIn) {
+          return '/admin_panel';
+        }
+
+        return null;
+      },
+
+      initialLocation: '/admin_panel',
+
+      routes: [
+        // ===== AUTH =====
+        GoRoute(
+          path: '/admin_login',
+          builder: (context, state) => const AuthScreen(),
+        ),
+
+        // ===== DASHBOARD ROOT =====
+        GoRoute(
+          path: '/admin_panel',
+          builder: (context, state) => const DashboardPage(),
+        ),
+
+        // ===== TEAM =====
+        GoRoute(
+          path: '/create_team',
+          builder: (context, state) => const CreateTeamScreen(),
+        ),
+        GoRoute(
+          path: '/team_list',
+          builder: (context, state) => TeamListScreen(),
+        ),
+GoRoute(
+  path: '/edit_team/:teamId', // add path param
+  builder: (context, state) {
+    final teamId = state.pathParameters['teamId']!;
+    return EditTeamScreen(teamId: teamId);
+  },
+),
+
+        // ===== PLAYER =====
+        GoRoute(
+          path: '/create_player',
+          builder: (context, state) => CreatePlayerScreen(
+            onDone: () {
+              context.go('/player_list');
+            },
+          ),
+        ),
+
+GoRoute(
+  path: '/edit_player',
+  builder: (context, state) {
+    final playerId = state.extra as String;
+
+    return EditPlayerScreen(
+      playerId: playerId,
+      onDone: () => context.go('/player_list'),
+    );
+  },
+),
+
+// COACH
+GoRoute(
+  path: '/edit_coach/:coachId', // add path param
+  builder: (context, state) {
+    final coachId = state.pathParameters['coachId']!;
+    return EditCoachScreen(coachId: coachId);
+  },
+),
+
+
+        GoRoute(
+          path: '/player_list',
+          builder: (context, state) => PlayerListScreen(
+           onNavigate: (view, {player}) {
+              // Intentionally empty.
+              // Body navigation is handled by AdminPanel.
+            },
+          ),
+        ),
+
+        // ===== TRANSFER =====
+        GoRoute(
+          path: '/create_transfer',
+          builder: (context, state) => const PlayerTransferScreen(),
+        ),
+        GoRoute(
+          path: '/transfer_list',
+          builder: (context, state) => TransferListScreen(),
+        ),
+
+        // ===== COACH =====
+        GoRoute(
+          path: '/create_coach',
+          builder: (context, state) => const CreateCoachScreen(),
+        ),
+        GoRoute(
+          path: '/coach_list',
+          builder: (context, state) => CoachListScreen(),
+        ),
+
+        // ===== LEAGUE =====
+        GoRoute(
+          path: '/create_league',
+          builder: (context, state) => const CreateLeagueScreen(),
+        ),
+        GoRoute(
+          path: '/leagues_list',
+          builder: (context, state) => const LeagueListScreen(),
+        ),
+
+        // ===== LIVE UPDATER =====
+        GoRoute(
+          path: '/live_updater/match_selector',
+          builder: (context, state) => const MatchSelectorScreen(),
+        ),
+
+        // ===== PUBLIC =====
+        GoRoute(
+          path: '/public_test',
+          builder: (context, state) => const PublicHomePage(),
+        ),
+      ],
+    );
+
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
-      routerConfig: _router,
+      routerConfig: router,
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
     );
+  }
+}
+
+/// 🔁 Refresh GoRouter on auth changes
+class GoRouterRefreshStream extends ChangeNotifier {
+  GoRouterRefreshStream(Stream<dynamic> stream) {
+    _subscription = stream.listen((_) => notifyListeners());
+  }
+
+  late final StreamSubscription<dynamic> _subscription;
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
   }
 }
