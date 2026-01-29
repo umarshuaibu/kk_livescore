@@ -4,7 +4,6 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:kklivescoreadmin/league_manager/live_updater/live_updater_screen.dart';
@@ -20,7 +19,7 @@ void main() async {
 
   /// ✅ Initialize Firebase BEFORE using Firestore
   await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+    options: DefaultFirebaseOptions.currentPlatform, // Remove if not using CLI
   );
 
   runApp(const MyApp());
@@ -33,18 +32,12 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'KK LiveScore Admin',
       debugShowCheckedModeBanner: false,
+
+      /// Attach the global navigator key
       navigatorKey: navigatorKey,
-      theme: ThemeData(
-        primaryColor: AppColors.primaryColor,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: AppColors.whiteColor,
-          foregroundColor: Colors.black,
-        ),
-      ),
+
       home: const MatchSelectorScreen(),
-      scrollBehavior: kIsWeb ? const MaterialScrollBehavior().copyWith(scrollbars: true) : null,
     );
   }
 }
@@ -237,8 +230,8 @@ class _MatchSelectorScreenState extends State<MatchSelectorScreen> {
     }
 
     if (mounted) {
-      // Use navigatorKey to ensure proper navigation on web
-      navigatorKey.currentState?.push(
+      Navigator.push(
+        context,
         MaterialPageRoute(
           builder: (_) => LiveUpdaterScreen(
             leagueId: _selectedLeagueId!,
@@ -388,8 +381,8 @@ class _MatchSelectorScreenState extends State<MatchSelectorScreen> {
   }
 
   // ------ Build UI ------
-  // Web-first responsive layout: left column = leagues & matches (scrollable),
-  // right column = match details & lineup selectors with action button pinned.
+  // Updated layout: content scrolls (Expanded + SingleChildScrollView) and the action button is pinned
+  // to the bottom safely. Removed Spacer() to avoid large empty space that caused overflow.
 
   @override
   Widget build(BuildContext context) {
@@ -397,527 +390,268 @@ class _MatchSelectorScreenState extends State<MatchSelectorScreen> {
       appBar: AppBar(
         title: const Text("Select Match"),
         backgroundColor: AppColors.whiteColor,
-        elevation: 1,
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : LayoutBuilder(builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 900;
-
-              Widget leaguesDropdown() {
-                return StreamBuilder<QuerySnapshot>(
-                  stream: _firestore.collection("leagues").snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return Text(
-                        "Error loading leagues: ${snapshot.error}",
-                        style: const TextStyle(color: Colors.red),
-                      );
-                    }
-
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const Text("No leagues available");
-                    }
-
-                    final leagues = snapshot.data!.docs;
-
-                    return DropdownButtonFormField<String>(
-                      value: _selectedLeagueId,
-                      hint: const Text("Select a league"),
-                      isExpanded: true,
-                      items: leagues.map((doc) {
-                        final data = doc.data() as Map<String, dynamic>;
-                        return DropdownMenuItem(
-                          value: doc.id,
-                          child: Text(data["name"] ?? "Unnamed League"),
+          : Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _firestore.collection("leagues").snapshots(),
+                    builder: (context, snapshot) {
+                      // Properly handle loading and errors so UI doesn't spin forever
+                      if (snapshot.hasError) {
+                        return Text(
+                          "Error loading leagues: ${snapshot.error}",
+                          style: const TextStyle(color: Colors.red),
                         );
-                      }).toList(),
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedLeagueId = val;
-                          _selectedMatchId = null;
-                          _teamAPlayers = [];
-                          _teamBPlayers = [];
-                          _selectedTeamAPlayers = [];
-                          _selectedTeamBPlayers = [];
-                        });
+                      }
 
-                        // Reset pagination and fetch matches for the new league
-                        _resetAndFetchMatches();
-                      },
-                    );
-                  },
-                );
-              }
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
 
-              Widget matchesList() {
-                return Container(
-                  constraints: const BoxConstraints(maxWidth: 420),
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      leaguesDropdown(),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: Card(
-                          elevation: 1,
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: _selectedLeagueId == null
-                                ? const Center(child: Text("Select a league to load matches."))
-                                : _matchesLoading
-                                    ? const Center(child: CircularProgressIndicator())
-                                    : _matchesError
-                                        ? Column(
-                                            children: [
-                                              Text(
-                                                "Error loading matches: ${_matchesErrorMessage ?? 'Unknown error'}",
-                                                style: const TextStyle(color: Colors.red),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              ElevatedButton(
-                                                onPressed: _fetchInitialMatches,
-                                                child: const Text("Retry"),
-                                              ),
-                                            ],
-                                          )
-                                        : _matchDocs.isEmpty
-                                            ? const Center(child: Text("No matches available"))
-                                            : Scrollbar(
-                                                thumbVisibility: true,
-                                                child: ListView.separated(
-                                                  shrinkWrap: true,
-                                                  physics: const ClampingScrollPhysics(),
-                                                  itemCount: _matchDocs.length + (_hasMore ? 1 : 0),
-                                                  separatorBuilder: (_, __) => const Divider(height: 0.5),
-                                                  itemBuilder: (context, index) {
-                                                    if (index == _matchDocs.length) {
-                                                      // Load more button row
-                                                      return Padding(
-                                                        padding: const EdgeInsets.symmetric(vertical: 8),
-                                                        child: Center(
-                                                          child: TextButton(
-                                                            onPressed: _isLoadingMore ? null : _loadMoreMatches,
-                                                            child: _isLoadingMore
-                                                                ? const SizedBox(
-                                                                    height: 16,
-                                                                    width: 16,
-                                                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                                                  )
-                                                                : const Text("Load more"),
-                                                          ),
-                                                        ),
-                                                      );
-                                                    }
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return const Text("No leagues available");
+                      }
 
-                                                    final doc = _matchDocs[index];
-                                                    final data = doc.data() as Map<String, dynamic>;
+                      final leagues = snapshot.data!.docs;
 
-                                                    final teamAId = data["teamAId"] as String?;
-                                                    final teamBId = data["teamBId"] as String?;
-                                                    final Timestamp? dateTs = data["date"];
+                      return DropdownButtonFormField<String>(
+                        value: _selectedLeagueId,
+                        hint: const Text("Select a league"),
+                        items: leagues.map((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          return DropdownMenuItem(
+                            value: doc.id,
+                            child: Text(data["name"] ?? "Unnamed League"),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedLeagueId = val;
+                            _selectedMatchId = null;
+                            _teamAPlayers = [];
+                            _teamBPlayers = [];
+                            _selectedTeamAPlayers = [];
+                            _selectedTeamBPlayers = [];
+                          });
 
-                                                    final bool isSelected = doc.id == _selectedMatchId;
-
-                                                    return InkWell(
-                                                      onTap: () {
-                                                        setState(() {
-                                                          _selectedMatchId = doc.id;
-                                                          _selectedTeamAPlayers.clear();
-                                                          _selectedTeamBPlayers.clear();
-                                                          _teamAPlayers.clear();
-                                                          _teamBPlayers.clear();
-                                                        });
-
-                                                        if (_selectedLeagueId != null) {
-                                                          _loadMatchDetails(_selectedLeagueId!, doc.id);
-                                                        }
-
-                                                        // On narrow screens, scroll to top of page so details are visible
-                                                        if (!isWide) {
-                                                          // no-op: content naturally scrolls on mobile layout
-                                                        }
-                                                      },
-                                                      child: Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                                                        color: isSelected ? Theme.of(context).primaryColor.withOpacity(0.06) : null,
-                                                        child: Row(
-                                                          children: [
-                                                            Expanded(
-                                                              child: FutureBuilder<List<String>>(
-                                                                future: Future.wait([
-                                                                  if (teamAId != null) _getTeamName(teamAId) else Future.value("Unknown"),
-                                                                  if (teamBId != null) _getTeamName(teamBId) else Future.value("Unknown"),
-                                                                ]),
-                                                                builder: (context, snap) {
-                                                                  if (snap.connectionState == ConnectionState.waiting) {
-                                                                    return const Text(
-                                                                      "Loading...",
-                                                                      style: TextStyle(fontSize: 12),
-                                                                    );
-                                                                  }
-                                                                  if (snap.hasError) {
-                                                                    return const Text(
-                                                                      "Failed to load teams",
-                                                                      style: TextStyle(fontSize: 12, color: Colors.red),
-                                                                    );
-                                                                  }
-
-                                                                  return Text(
-                                                                    "${snap.data![0]}  vs  ${snap.data![1]}",
-                                                                    maxLines: 1,
-                                                                    overflow: TextOverflow.ellipsis,
-                                                                    style: TextStyle(
-                                                                      fontSize: 13,
-                                                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                                                                    ),
-                                                                  );
-                                                                },
-                                                              ),
-                                                            ),
-                                                            if (dateTs != null)
-                                                              Padding(
-                                                                padding: const EdgeInsets.only(left: 8),
-                                                                child: _MatchDateBadge(dateTs.toDate(), compact: true),
-                                                              ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                              ),
-                          ),
-                        ),
-                      ),
-                    ],
+                          // Reset pagination and fetch matches for the new league
+                          _resetAndFetchMatches();
+                        },
+                      );
+                    },
                   ),
-                );
-              }
 
-              Widget detailsPane() {
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Card(
-                      elevation: 1,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          children: [
-                            // Header
-                            Row(
+                  const SizedBox(height: 20),
+
+                  // Make the main content scrollable while keeping the button pinned at bottom
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // ---------------- Matches (manual paging + realtime for loaded pages) ----------------
+                          if (_selectedLeagueId != null)
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(
-                                  child: Column(
+                                if (_matchesLoading)
+                                  const Center(child: CircularProgressIndicator())
+                                else if (_matchesError)
+                                  Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        _selectedMatchId == null ? "No match selected" : "Selected Match",
-                                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                                        "Error loading matches: ${_matchesErrorMessage ?? 'Unknown error'}",
+                                        style: const TextStyle(color: Colors.red),
                                       ),
-                                      const SizedBox(height: 6),
-                                      if (_selectedMatchId != null)
-                                        Text(
-                                          "${_teamAName ?? ''}  vs  ${_teamBName ?? ''}",
-                                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                // Small action area for web: quick clear / refresh
-                                IconButton(
-                                  tooltip: "Refresh match details",
-                                  onPressed: _selectedMatchId != null && _selectedLeagueId != null
-                                      ? () => _loadMatchDetails(_selectedLeagueId!, _selectedMatchId!)
-                                      : null,
-                                  icon: const Icon(Icons.refresh),
-                                ),
-                                IconButton(
-                                  tooltip: "Clear selection",
-                                  onPressed: () {
-                                    setState(() {
-                                      _selectedMatchId = null;
-                                      _teamAPlayers = [];
-                                      _teamBPlayers = [];
-                                      _selectedTeamAPlayers = [];
-                                      _selectedTeamBPlayers = [];
-                                    });
-                                  },
-                                  icon: const Icon(Icons.clear),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-
-                            // Main content (lineup selectors)
-                            Expanded(
-                              child: SingleChildScrollView(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (_teamAPlayers.isNotEmpty) ...[
-                                      Text("Select lineup for ${_teamAName ?? ''}"),
                                       const SizedBox(height: 8),
-                                      MultiSelectDialogField<Map<String, dynamic>>(
-                                        items: _teamAPlayers.map((p) => MultiSelectItem(p, p["name"])).toList(),
-                                        title: Text("${_teamAName ?? ''} Players"),
-                                        buttonText: const Text("Choose players"),
-                                        chipDisplay: MultiSelectChipDisplay(
-                                          chipColor: Colors.grey.shade200,
-                                          textStyle: const TextStyle(color: Colors.black87),
-                                        ),
-                                        onConfirm: (values) {
-                                          _selectedTeamAPlayers = values.cast<Map<String, dynamic>>();
+                                      ElevatedButton(
+                                        onPressed: () {
+                                          // retry fetching initial matches
+                                          _fetchInitialMatches();
                                         },
+                                        child: const Text("Retry"),
                                       ),
-                                    ] else if (_selectedMatchId != null) ...[
-                                      const Text("No players available for Team A"),
-                                      const SizedBox(height: 8),
                                     ],
+                                  )
+                                else if (_matchDocs.isEmpty)
+                                  const Text(
+                                    "No matches available",
+                                    style: TextStyle(fontSize: 12),
+                                  )
+                                else
+                                  Column(
+                                    children: [
+                                      ListView.separated(
+                                        shrinkWrap: true,
+                                        physics: const NeverScrollableScrollPhysics(),
+                                        itemCount: _matchDocs.length,
+                                        separatorBuilder: (_, __) => const Divider(height: 0.5),
+                                        itemBuilder: (context, index) {
+                                          final doc = _matchDocs[index];
+                                          final data = doc.data() as Map<String, dynamic>;
 
-                                    const SizedBox(height: 16),
+                                          final teamAId = data["teamAId"] as String?;
+                                          final teamBId = data["teamBId"] as String?;
+                                          final Timestamp? dateTs = data["date"];
 
-                                    if (_teamBPlayers.isNotEmpty) ...[
-                                      Text("Select lineup for ${_teamBName ?? ''}"),
-                                      const SizedBox(height: 8),
-                                      MultiSelectDialogField<Map<String, dynamic>>(
-                                        items: _teamBPlayers.map((p) => MultiSelectItem(p, p["name"])).toList(),
-                                        title: Text("${_teamBName ?? ''} Players"),
-                                        buttonText: const Text("Choose players"),
-                                        chipDisplay: MultiSelectChipDisplay(
-                                          chipColor: Colors.grey.shade200,
-                                          textStyle: const TextStyle(color: Colors.black87),
-                                        ),
-                                        onConfirm: (values) {
-                                          _selectedTeamBPlayers = values.cast<Map<String, dynamic>>();
-                                        },
-                                      ),
-                                    ] else if (_selectedMatchId != null) ...[
-                                      const Text("No players available for Team B"),
-                                      const SizedBox(height: 8),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ),
+                                          final bool isSelected = doc.id == _selectedMatchId;
 
-                            // Action bar pinned to bottom of details card
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ElevatedButton(
-                                    onPressed: _selectedMatchId == null || _loading ? null : _saveLineups,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.primaryColor,
-                                      foregroundColor: Colors.white,
-                                      minimumSize: const Size(double.infinity, 48),
-                                    ),
-                                    child: _loading
-                                        ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                        : const Text("Continue to Live Updater"),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              }
+                                          return InkWell(
+                                            onTap: () {
+                                              setState(() {
+                                                _selectedMatchId = doc.id;
+                                                _selectedTeamAPlayers.clear();
+                                                _selectedTeamBPlayers.clear();
+                                                _teamAPlayers.clear();
+                                                _teamBPlayers.clear();
+                                              });
 
-              // Responsive composition
-              if (isWide) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Left: leagues + matches
-                    SizedBox(
-                      width: 380,
-                      child: matchesList(),
-                    ),
-
-                    // Middle/Right: match details and action
-                    detailsPane(),
-                  ],
-                );
-              } else {
-                // Narrow/mobile layout: stack vertically (keeps original behavior)
-                return Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    children: [
-                      leaguesDropdown(),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: Card(
-                          elevation: 1,
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: _selectedLeagueId == null
-                                ? const Center(child: Text("Select a league to load matches."))
-                                : _matchesLoading
-                                    ? const Center(child: CircularProgressIndicator())
-                                    : _matchesError
-                                        ? Column(
-                                            children: [
-                                              Text(
-                                                "Error loading matches: ${_matchesErrorMessage ?? 'Unknown error'}",
-                                                style: const TextStyle(color: Colors.red),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              ElevatedButton(
-                                                onPressed: _fetchInitialMatches,
-                                                child: const Text("Retry"),
-                                              ),
-                                            ],
-                                          )
-                                        : _matchDocs.isEmpty
-                                            ? const Center(child: Text("No matches available"))
-                                            : ListView.separated(
-                                                itemCount: _matchDocs.length + (_hasMore ? 1 : 0),
-                                                separatorBuilder: (_, __) => const Divider(height: 0.5),
-                                                itemBuilder: (context, index) {
-                                                  if (index == _matchDocs.length) {
-                                                    return Padding(
-                                                      padding: const EdgeInsets.symmetric(vertical: 8),
-                                                      child: Center(
-                                                        child: TextButton(
-                                                          onPressed: _isLoadingMore ? null : _loadMoreMatches,
-                                                          child: _isLoadingMore
-                                                              ? const SizedBox(
-                                                                  height: 16,
-                                                                  width: 16,
-                                                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                                                )
-                                                              : const Text("Load more"),
-                                                        ),
-                                                      ),
-                                                    );
-                                                  }
-
-                                                  final doc = _matchDocs[index];
-                                                  final data = doc.data() as Map<String, dynamic>;
-
-                                                  final teamAId = data["teamAId"] as String?;
-                                                  final teamBId = data["teamBId"] as String?;
-                                                  final Timestamp? dateTs = data["date"];
-
-                                                  final bool isSelected = doc.id == _selectedMatchId;
-
-                                                  return ListTile(
-                                                    onTap: () {
-                                                      setState(() {
-                                                        _selectedMatchId = doc.id;
-                                                        _selectedTeamAPlayers.clear();
-                                                        _selectedTeamBPlayers.clear();
-                                                        _teamAPlayers.clear();
-                                                        _teamBPlayers.clear();
-                                                      });
-
-                                                      if (_selectedLeagueId != null) {
-                                                        _loadMatchDetails(_selectedLeagueId!, doc.id);
-                                                      }
-                                                    },
-                                                    title: FutureBuilder<List<String>>(
+                                              if (_selectedLeagueId != null) {
+                                                _loadMatchDetails(_selectedLeagueId!, doc.id);
+                                              }
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                              color: isSelected
+                                                  ? Theme.of(context).primaryColor.withOpacity(0.08)
+                                                  : null,
+                                              child: Row(
+                                                children: [
+                                                  /// ⚽ TEAMS (SMALL, COMPACT)
+                                                  Expanded(
+                                                    child: FutureBuilder<List<String>>(
                                                       future: Future.wait([
                                                         if (teamAId != null) _getTeamName(teamAId) else Future.value("Unknown"),
                                                         if (teamBId != null) _getTeamName(teamBId) else Future.value("Unknown"),
                                                       ]),
                                                       builder: (context, snap) {
                                                         if (snap.connectionState == ConnectionState.waiting) {
-                                                          return const Text("Loading...");
+                                                          return const Text(
+                                                            "Loading...",
+                                                            style: TextStyle(fontSize: 11),
+                                                          );
                                                         }
                                                         if (snap.hasError) {
-                                                          return const Text("Failed to load teams", style: TextStyle(color: Colors.red));
+                                                          return const Text(
+                                                            "Failed to load teams",
+                                                            style: TextStyle(fontSize: 11, color: Colors.red),
+                                                          );
                                                         }
-                                                        return Text("${snap.data![0]}  vs  ${snap.data![1]}",
-                                                            maxLines: 1, overflow: TextOverflow.ellipsis);
+
+                                                        return Text(
+                                                          "${snap.data![0]}  vs  ${snap.data![1]}",
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow.ellipsis,
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                                          ),
+                                                        );
                                                       },
                                                     ),
-                                                    trailing: dateTs != null ? _MatchDateBadge(dateTs.toDate(), compact: true) : null,
-                                                    selected: isSelected,
-                                                  );
-                                                },
+                                                  ),
+
+                                                  /// 🗓 DATE (TINY BADGE)
+                                                  if (dateTs != null)
+                                                    Padding(
+                                                      padding: const EdgeInsets.only(left: 6),
+                                                      child: _MatchDateBadge(
+                                                        dateTs.toDate(),
+                                                        compact: true,
+                                                      ),
+                                                    ),
+                                                ],
                                               ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      // Details + continue button below matches
-                      Card(
-                        elevation: 1,
-                        child: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Column(
-                            children: [
-                              if (_selectedMatchId == null)
-                                const Text("No match selected")
-                              else
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "${_teamAName ?? ''}  vs  ${_teamBName ?? ''}",
-                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    if (_teamAPlayers.isNotEmpty) ...[
-                                      Text("Select lineup for ${_teamAName ?? ''}"),
-                                      const SizedBox(height: 8),
-                                      MultiSelectDialogField<Map<String, dynamic>>(
-                                        items: _teamAPlayers.map((p) => MultiSelectItem(p, p["name"])).toList(),
-                                        title: Text("${_teamAName ?? ''} Players"),
-                                        buttonText: const Text("Choose players"),
-                                        onConfirm: (values) {
-                                          _selectedTeamAPlayers = values.cast<Map<String, dynamic>>();
+                                            ),
+                                          );
                                         },
                                       ),
-                                      const SizedBox(height: 12),
+
+                                      /// ⬇️ LOAD MORE
+                                      if (_hasMore)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 6),
+                                          child: TextButton(
+                                            onPressed: _isLoadingMore ? null : _loadMoreMatches,
+                                            child: _isLoadingMore
+                                                ? const SizedBox(
+                                                    height: 16,
+                                                    width: 16,
+                                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                                  )
+                                                : const Text(
+                                                    "Load more",
+                                                    style: TextStyle(fontSize: 12),
+                                                  ),
+                                          ),
+                                        ),
                                     ],
-                                    if (_teamBPlayers.isNotEmpty) ...[
-                                      Text("Select lineup for ${_teamBName ?? ''}"),
-                                      const SizedBox(height: 8),
-                                      MultiSelectDialogField<Map<String, dynamic>>(
-                                        items: _teamBPlayers.map((p) => MultiSelectItem(p, p["name"])).toList(),
-                                        title: Text("${_teamBName ?? ''} Players"),
-                                        buttonText: const Text("Choose players"),
-                                        onConfirm: (values) {
-                                          _selectedTeamBPlayers = values.cast<Map<String, dynamic>>();
-                                        },
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              const SizedBox(height: 12),
-                              ElevatedButton(
-                                onPressed: _selectedMatchId == null || _loading ? null : _saveLineups,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.primaryColor,
-                                  foregroundColor: Colors.white,
-                                  minimumSize: const Size(double.infinity, 48),
-                                ),
-                                child: _loading
-                                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                    : const Text("Continue to Live Updater"),
-                              )
-                            ],
-                          ),
-                        ),
+                                  ),
+                              ],
+                            ),
+
+                          const SizedBox(height: 20),
+
+                          if (_teamAPlayers.isNotEmpty) ...[
+                            Text("Select lineup for ${_teamAName ?? ''}"),
+                            const SizedBox(height: 8),
+                            MultiSelectDialogField<Map<String, dynamic>>(
+                              items: _teamAPlayers
+                                  .map((p) => MultiSelectItem(p, p["name"]))
+                                  .toList(),
+                              title: Text("${_teamAName ?? ''} Players"),
+                              buttonText: const Text("Choose players"),
+                              onConfirm: (values) {
+                                _selectedTeamAPlayers = values.cast<Map<String, dynamic>>();
+                              },
+                            ),
+                          ],
+
+                          const SizedBox(height: 10),
+
+                          if (_teamBPlayers.isNotEmpty) ...[
+                            Text("Select lineup for ${_teamBName ?? ''}"),
+                            const SizedBox(height: 8),
+                            MultiSelectDialogField<Map<String, dynamic>>(
+                              items: _teamBPlayers
+                                  .map((p) => MultiSelectItem(p, p["name"]))
+                                  .toList(),
+                              title: Text("${_teamBName ?? ''} Players"),
+                              buttonText: const Text("Choose players"),
+                              onConfirm: (values) {
+                                _selectedTeamBPlayers = values.cast<Map<String, dynamic>>();
+                              },
+                            ),
+                          ],
+
+                          const SizedBox(height: 16),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                );
-              }
-            }),
+
+                  // Button pinned to bottom (safe area)
+                  SafeArea(
+                    top: false,
+                    child: ElevatedButton(
+                      onPressed: _selectedMatchId == null ? null : _saveLineups,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryColor,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      child: const Text("Continue to Live Updater"),
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }
