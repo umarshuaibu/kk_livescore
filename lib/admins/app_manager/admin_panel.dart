@@ -24,8 +24,6 @@ class _DashboardPageState extends State<DashboardPage> {
   AdminBodyView _activeBodyView = AdminBodyView.dashboard;
   Player? _selectedPlayer;
 
-
-
   // ================= NAVIGATION HANDLER =================
   void _handleDashboardNavigation(
     AdminBodyView view, {
@@ -35,41 +33,40 @@ class _DashboardPageState extends State<DashboardPage> {
       _activeBodyView = view;
       _selectedPlayer = player;
     });
+
+    // Close drawer on mobile after navigation
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
   }
 
-Future<void> signOut(BuildContext context) async {
-  try {
-    // 1️⃣ Show a loading indicator to prevent multiple taps
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
+  // ================= SIGN OUT =================
+  Future<void> signOut(BuildContext context) async {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
 
-    // 2️⃣ Sign out from Firebase
-    await FirebaseAuth.instance.signOut();
+      await FirebaseAuth.instance.signOut();
 
-    // 3️⃣ Navigate to your login screen (replace with your actual login screen widget)
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const DashboardPage ()),
-      (route) => false,
-    );
-  } catch (_) {
-    // Show a generic error message
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Unable to sign out. Please try again.'),
-      ),
-    );
-  } finally {
-    // 4️⃣ Close the loading dialog if it is still open
-    if (Navigator.canPop(context)) Navigator.of(context).pop();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const DashboardPage()),
+        (route) => false,
+      );
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to sign out. Please try again.'),
+        ),
+      );
+    } finally {
+      if (Navigator.canPop(context)) Navigator.of(context).pop();
+    }
   }
-}
-
-
 
   // ================= MAIN BODY RESOLVER =================
   Widget _resolveMainBody() {
@@ -115,9 +112,9 @@ Future<void> signOut(BuildContext context) async {
 
       case AdminBodyView.liveMatchUpdater:
         return const MatchSelectorScreen(key: ValueKey('live_matches'));
-        
-              case AdminBodyView.leagues:
-        return const LeagueListScreen(key: ValueKey('Leagues_list'));
+
+      case AdminBodyView.leagues:
+        return const LeagueListScreen(key: ValueKey('leagues'));
 
       case AdminBodyView.news:
         return const LeagueListScreen(key: ValueKey('news'));
@@ -127,6 +124,54 @@ Future<void> signOut(BuildContext context) async {
     }
   }
 
+  // ================= SIDEBAR CONTENT (REUSED) =================
+  Widget _buildSidebarContent() {
+    return Column(
+      children: [
+        const SizedBox(height: 24),
+        const Text(
+          "KK LIVESCORE",
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 32),
+
+        _sidebarItem(Icons.dashboard, "Dashboard",
+            () => _handleDashboardNavigation(AdminBodyView.dashboard)),
+
+        _sidebarItem(Icons.sports_soccer, "Live Matches",
+            () => _handleDashboardNavigation(AdminBodyView.liveMatchUpdater)),
+
+        _sidebarItem(Icons.article, "News",
+            () => _handleDashboardNavigation(AdminBodyView.news)),
+
+        _sidebarItem(Icons.group, "Teams",
+            () => _handleDashboardNavigation(AdminBodyView.teams)),
+
+        _sidebarItem(Icons.people, "Players",
+            () => _handleDashboardNavigation(AdminBodyView.players)),
+
+        _sidebarItem(Icons.swap_horiz, "Transfers",
+            () => _handleDashboardNavigation(AdminBodyView.transfers)),
+
+        _sidebarItem(Icons.people, "Coaches",
+            () => _handleDashboardNavigation(AdminBodyView.coaches)),
+
+        const Spacer(),
+        const Divider(color: Colors.white24),
+
+        _sidebarItem(Icons.logout, "Logout", () {
+          signOut(context);
+        }),
+
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
   // ================= UI =================
   @override
   Widget build(BuildContext context) {
@@ -134,9 +179,33 @@ Future<void> signOut(BuildContext context) async {
 
     return Scaffold(
       backgroundColor: kSecondaryColor,
+
+      // ===== APP BAR (MOBILE ONLY) =====
+      appBar: isDesktop
+          ? null
+          : AppBar(
+              backgroundColor: kPrimaryColor,
+              foregroundColor: kWhiteColor,
+              title: const Text(
+                'KK Livescore Admin',
+                style: TextStyle(fontSize: 16),
+                
+              ),
+            ),
+
+      // ===== DRAWER (MOBILE ONLY) =====
+      drawer: isDesktop
+          ? null
+          : Drawer(
+              backgroundColor: kPrimaryColor,
+              child: SafeArea(
+                child: _buildSidebarContent(),
+              ),
+            ),
+
       body: Row(
         children: [
-          // ================= SIDEBAR =================
+          // ===== SIDEBAR (DESKTOP ONLY) =====
           if (isDesktop)
             Container(
               width: 240,
@@ -146,52 +215,10 @@ Future<void> signOut(BuildContext context) async {
                   BoxShadow(color: kScaffoldColor, blurRadius: 6),
                 ],
               ),
-              child: Column(
-                children: [
-                  const SizedBox(height: 24),
-                  const Text(
-                    "KK LIVESCORE",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-
-                  _sidebarItem(Icons.dashboard, "Dashboard",
-                      () => _handleDashboardNavigation(AdminBodyView.dashboard)),
-
-                  _sidebarItem(Icons.sports_soccer, "Live Matches",
-                      () => _handleDashboardNavigation(AdminBodyView.liveMatchUpdater)),
-
-                  _sidebarItem(Icons.article, "News",
-                      () => _handleDashboardNavigation(AdminBodyView.news)),
-
-                  _sidebarItem(Icons.group, "Teams",
-                      () => _handleDashboardNavigation(AdminBodyView.teams)),
-
-                  _sidebarItem(Icons.people, "Players",
-                      () => _handleDashboardNavigation(AdminBodyView.players)),
-
-                  _sidebarItem(Icons.swap_horiz, "Transfers",
-                      () => _handleDashboardNavigation(AdminBodyView.transfers)),
-
-                  _sidebarItem(Icons.people, "Coaches",
-                      () => _handleDashboardNavigation(AdminBodyView.coaches)),
-
-                  const Spacer(),
-                  const Divider(color: Colors.white24),
-                 _sidebarItem(Icons.logout, "Logout", () {
-  signOut(context); // Call the cleaned-up function
-}),
-
-                  const SizedBox(height: 16),
-                ],
-              ),
+              child: _buildSidebarContent(),
             ),
 
-          // ================= MAIN CONTENT =================
+          // ===== MAIN CONTENT =====
           Expanded(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),
@@ -202,10 +229,6 @@ Future<void> signOut(BuildContext context) async {
       ),
     );
   }
-
-
-
-
 
   // ================= SIDEBAR ITEM =================
   Widget _sidebarItem(
