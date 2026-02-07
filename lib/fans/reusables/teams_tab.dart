@@ -451,45 +451,12 @@ class _TeamDetailsPageState extends State<TeamDetailsPage> {
             padding: EdgeInsets.symmetric(vertical: eqW(6)),
             child: Text('Players', style: kText14White),
           ),
-          _players.isEmpty
-              ? Text('No player data available', style: kText12White)
-              : Column(
-                  children: _players.map((p) {
-                    final playerName = p['name']?.toString() ?? '-';
-                    final photo = (p['photoUrl'] ?? p['PlayerPhoto'])?.toString();
-                    final position = p['position']?.toString() ?? '-';
-                    final jersey = p['JerseyNo']?.toString() ?? p['jersey']?.toString() ?? '-';
+_players.isEmpty
+    ? Text('No player data available', style: kText12White)
+    : Column(
+        children: _players.map(_playerTile).toList(),
+      ),
 
-                    return Container(
-                      margin: EdgeInsets.symmetric(vertical: eqW(6)),
-                      padding: EdgeInsets.all(eqW(8)),
-                      decoration: BoxDecoration(color: kPrimaryColor, borderRadius: BorderRadius.circular(eqW(6))),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: eqW(44),
-                            height: eqW(44),
-                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(eqW(6)), color: kGrey1.withOpacity(0.08)),
-                            child: (photo != null && photo.isNotEmpty)
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(eqW(6)),
-                                    child: Image.network(photo, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Icon(Icons.person, color: kGrey2)),
-                                  )
-                                : Icon(Icons.person, color: kGrey2),
-                          ),
-                          SizedBox(width: eqW(12)),
-                          Expanded(
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(playerName, style: kText12White),
-                              SizedBox(height: eqW(4)),
-                              Text('Pos: $position • #$jersey', style: kText12GreyR),
-                            ]),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
           Divider(color: kGrey1),
 
           // Team statistics from standings
@@ -538,6 +505,336 @@ class _TeamDetailsPageState extends State<TeamDetailsPage> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [Text(label, style: kText12White), Text(value, style: kText12White)],
       ),
+    );
+  }
+
+  Widget _playerTile(Map<String, dynamic> p) {
+  final playerId = p['id'] ?? p['playerId'] ?? '';
+  final playerName = p['name']?.toString() ?? '-';
+  final photo = (p['photoUrl'] ?? p['playerPhoto'])?.toString();
+  final position = p['position']?.toString() ?? '-';
+  final jersey = p['JerseyNo']?.toString() ?? '-';
+
+  return InkWell(
+    onTap: () {
+      if (playerId.isEmpty) return;
+      _openPlayerDialog(playerId);
+    },
+    child: Padding(
+      padding: EdgeInsets.symmetric(vertical: eqW(4)),
+      child: Row(
+        children: [
+          Container(
+            width: eqW(32),
+            height: eqW(32),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(eqW(6)),
+              color: kGrey1.withOpacity(0.15),
+            ),
+            child: (photo != null && photo.isNotEmpty)
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(eqW(6)),
+                    child: Image.network(
+                      photo,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          Icon(Icons.person, size: 18, color: kGrey2),
+                    ),
+                  )
+                : Icon(Icons.person, size: 18, color: kGrey2),
+          ),
+          SizedBox(width: eqW(8)),
+          Expanded(
+            child: Text(
+              '$playerName • $position • #$jersey',
+              style: kText10GreyR,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Icon(Icons.info_outline, size: 16, color: kGrey2),
+        ],
+      ),
+    ),
+  );
+}
+void _openPlayerDialog(String playerId) {
+  showDialog(
+    context: context,
+    barrierDismissible: true,
+    builder: (_) => PlayerDetailsDialog(
+      leagueId: widget.leagueId,
+      playerId: playerId,
+    ),
+  );
+}
+
+
+}
+class PlayerDetailsDialog extends StatefulWidget {
+  final String leagueId;
+  final String playerId;
+
+  const PlayerDetailsDialog({
+    super.key,
+    required this.leagueId,
+    required this.playerId,
+  });
+
+  @override
+  State<PlayerDetailsDialog> createState() => _PlayerDetailsDialogState();
+}
+class _PlayerDetailsDialogState extends State<PlayerDetailsDialog> {
+  bool _eventsLoading = true;
+
+  Map<String, dynamic>? _player;
+  List<Map<String, dynamic>> _events = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+        Future<void> _loadData() async {
+          try {
+            // ---------- Load player FIRST ----------
+            final pSnap = await FirebaseFirestore.instance
+                .collection('players')
+                .doc(widget.playerId)
+                .get();
+
+            if (mounted) {
+              setState(() {
+                _player = pSnap.data();
+                _loading = false;        // dialog visible
+                _eventsLoading = true;   // events still loading
+              });
+            }
+
+            // ---------- Load events AFTER UI ----------
+            final matchesSnap = await FirebaseFirestore.instance
+                .collection('leagues')
+                .doc(widget.leagueId)
+                .collection('matches')
+                .get();
+
+            List<Map<String, dynamic>> events = [];
+
+            for (final m in matchesSnap.docs) {
+              final eSnap = await m.reference
+                  .collection('events')
+                  .where('playerId', isEqualTo: widget.playerId)
+                  .get();
+
+              events.addAll(eSnap.docs.map((d) => d.data()));
+            }
+
+            if (mounted) {
+              setState(() {
+                _events = events.where((e) => e['type'] != 'Goal -1').toList();
+                _eventsLoading = false; // DONE
+              });
+            }
+          } catch (e) {
+            debugPrint('Player dialog load failed: $e');
+
+            if (mounted) {
+              setState(() {
+                _eventsLoading = false;
+              });
+            }
+          }
+        }
+
+
+
+int _ageFromDob(dynamic dob) {
+  if (dob == null) return 0;
+
+  DateTime birth;
+
+  // Firestore Timestamp
+  if (dob is Timestamp) {
+    birth = dob.toDate();
+  }
+  // ISO String (e.g. "2010-02-06T00:00:00.000")
+  else if (dob is String) {
+    birth = DateTime.tryParse(dob) ?? DateTime.now();
+  }
+  // Unknown type
+  else {
+    return 0;
+  }
+
+  final now = DateTime.now();
+  int age = now.year - birth.year;
+
+  if (now.month < birth.month ||
+      (now.month == birth.month && now.day < birth.day)) {
+    age--;
+  }
+
+  return age;
+}
+
+Map<String, int> _eventSummary() {
+  final Map<String, int> summary = {};
+
+  for (final e in _events) {
+    final type = e['type']?.toString();
+    if (type == null) continue;
+
+    summary[type] = (summary[type] ?? 0) + 1;
+  }
+
+  return summary;
+}
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: kSecondaryColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(eqW(12)),
+      ),
+child: Padding(
+  padding: EdgeInsets.all(eqW(12)),
+  child: _loading
+      ? const SizedBox(
+          height: 120,
+          child: Center(child: CircularProgressIndicator()),
+        )
+      : Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _header(),
+            SizedBox(height: eqW(10)),
+            Divider(color: kGrey1),
+
+            Text('League Events', style: kText12White),
+            SizedBox(height: eqW(6)),
+
+            // 👇 EVENTS LOADING HANDLER
+            _eventsLoading
+                ? Padding(
+                    padding: EdgeInsets.symmetric(vertical: eqW(12)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: kPrimaryColor,
+                          ),
+                        ),
+                        SizedBox(width: eqW(8)),
+                        Text('Loading events...', style: kText10GreyR),
+                      ],
+                    ),
+                  )
+                : Builder(
+                    builder: (_) {
+                      final summary = _eventSummary();
+
+                      return summary.isEmpty
+                          ? Text('No events recorded', style: kText10GreyR)
+                          : Wrap(
+                              spacing: eqW(6),
+                              runSpacing: eqW(6),
+                            children: summary.entries.take(8).map((e) {
+                                return _eventBadge({
+                                  'type': e.key,
+                                  'count': e.value,
+                                });
+                              }).toList(),
+                            );
+                    },
+                  ),
+          ],
+        ),
+),
+
+
+    );
+  }
+
+  Widget _header() {
+    final age = _ageFromDob(_player?['dateOfBirth']);
+     final photo = (_player?['photoUrl'] ?? _player?['playerPhoto'])?.toString();
+
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: eqW(22),
+          backgroundColor: kGrey1.withOpacity(0.15),
+          backgroundImage:
+              (photo != null && photo.isNotEmpty) ? NetworkImage(photo) : null,
+          child: (photo == null || photo.isEmpty)
+              ? Icon(Icons.person, color: kGrey2)
+              : null,
+        ),
+
+        SizedBox(width: eqW(10)),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_player?['name'] ?? '-', style: kText14White),
+              Text(
+                '${_player?['position'] ?? '-'} • ${_player?['JerseyNo'] ?? '-'} • Age $age',
+                style: kText10GreyR,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+Widget _eventBadge(Map<String, dynamic> e) {
+  final type = e['type']?.toString() ?? '';
+  final count = e['count'] ?? 1;
+
+    IconData icon;
+    Color color;
+
+    switch (type) {
+      case 'Goal +1':
+        icon = Icons.sports_soccer;
+        color = Colors.green;
+        break;
+      case 'Yellow Card':
+        icon = Icons.square;
+        color = Colors.yellow;
+        break;
+      case 'Red Card':
+        icon = Icons.square;
+        color = Colors.red;
+        break;
+      case 'Substitution':
+        icon = Icons.swap_horiz;
+        color = Colors.blue;
+        break;
+      default:
+        icon = Icons.info;
+        color = kGrey2;
+    }
+
+    return Chip(
+      avatar: Icon(icon, size: 16, color: color),
+      label: Text(
+  type == 'Goal +1' ? 'Goals: $count' : '$type ($count)',
+  style: kText10GreyR,
+),
+
+      backgroundColor: kPrimaryColor,
     );
   }
 }

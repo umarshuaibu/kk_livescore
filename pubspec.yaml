@@ -47,6 +47,7 @@ dependencies:
   flutter_speed_dial: any
   intl: ^0.19.0
   debounce_throttle: ^2.0.0
+  google_mobile_ads: ^5.0.0
 
 
   # The "flutter_lints" package below contains a set of recommended lints to

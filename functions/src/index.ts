@@ -11,8 +11,9 @@ const corsHandler = cors({origin: true});
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "farouqasm1@gmail.com",
-    pass: "fajtukbhzxqtfxsm", // app password
+    user: "rahamasuperleague@gmail.com",
+    pass: "rgfbnhjyloimeyem", // app password
+    // rgfb nhjy loim eyem
   },
 });
 

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'package:kklivescoreadmin/constants/colors.dart';
 import 'package:kklivescoreadmin/constants/size.dart';
@@ -23,9 +24,46 @@ class MatchesTab extends StatefulWidget {
 
   @override
   State<MatchesTab> createState() => _MatchesTabState();
+  
 }
 
 class _MatchesTabState extends State<MatchesTab> {
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNativeAd(); // ✅ correct place
+  }
+
+
+NativeAd? _nativeAd;
+bool _isNativeAdLoaded = false;
+
+void _loadNativeAd() {
+  _nativeAd = NativeAd(
+    adUnitId: 'ca-app-pub-7769762821516033/6501689818', // TEST
+    factoryId: 'listTile',
+    request: const AdRequest(),
+    listener: NativeAdListener(
+      onAdLoaded: (ad) {
+        if (!mounted) return;
+        setState(() => _isNativeAdLoaded = true);
+      },
+      onAdFailedToLoad: (ad, error) {
+        ad.dispose();
+        debugPrint('Native ad failed: $error');
+      },
+    ),
+  )..load();
+}
+
+@override
+void dispose() {
+  _nativeAd?.dispose();
+  super.dispose();
+}
+
+
   // Simple in-memory cache for team documents to reduce reads
   final Map<String, Map<String, dynamic>> _teamsCache = {};
 
@@ -35,6 +73,12 @@ class _MatchesTabState extends State<MatchesTab> {
   // Date/time formatting
   final DateFormat _dateFmt = DateFormat.yMMMMEEEEd();
   final DateFormat _timeFmt = DateFormat('hh:mm a');
+
+static const int _adInterval = 6;
+
+bool _shouldShowAd(int index) {
+  return (index + 1) % _adInterval == 0;
+}
 
   // Helper: get team document (cached)
   Future<Map<String, dynamic>?> _getTeam(String? teamId) async {
@@ -52,6 +96,30 @@ class _MatchesTabState extends State<MatchesTab> {
       return null;
     }
   }
+
+Widget _nativeAdSlot() {
+  final ad = NativeAd(
+    adUnitId: 'ca-app-pub-3940256099942544/2247696110',
+    factoryId: 'listTile',
+    request: const AdRequest(),
+    listener: NativeAdListener(
+      onAdFailedToLoad: (ad, error) {
+        ad.dispose();
+      },
+    ),
+  )..load();
+
+  return Container(
+    margin: EdgeInsets.symmetric(vertical: eqW(8), horizontal: eqW(6)),
+    height: 90,
+    decoration: BoxDecoration(
+      color: kSecondaryColor,
+      borderRadius: BorderRadius.circular(eqW(8)),
+    ),
+    child: AdWidget(ad: ad),
+  );
+}
+
 
   // Helper: build stream to use (prefer provided matchesStream; otherwise follow spec)
   Stream<QuerySnapshot> get _effectiveStream {
@@ -160,14 +228,31 @@ class _MatchesTabState extends State<MatchesTab> {
           title,
           style: kText12White.copyWith(fontWeight: FontWeight.w600),
         ),
-        children: items.isEmpty
-            ? [
-                Padding(
-                  padding: EdgeInsets.all(eqW(12)),
-                  child: Text('No matches', style: kText12White),
-                )
-              ]
-            : items.map((m) => _buildMatchItem(status, m)).toList(),
+children: items.isEmpty
+    ? [
+        Padding(
+          padding: EdgeInsets.all(eqW(12)),
+          child: Text('No matches', style: kText12White),
+        )
+      ]
+    : List.generate(items.length, (index) {
+        final widgets = <Widget>[];
+
+        widgets.add(_buildMatchItem(status, items[index]));
+
+        // Insert native ad at interval
+if (_shouldShowAd(index)) {
+  widgets.add(_nativeAdSlot());
+}
+
+
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: widgets,
+        );
+      }),
+
       ),
     );
   }
@@ -557,6 +642,24 @@ class _MatchesTabState extends State<MatchesTab> {
       ),
     );
   }
+
+Widget _nativeAdWidget() {
+  if (!_isNativeAdLoaded || _nativeAd == null) {
+    return const SizedBox.shrink();
+  }
+
+  return Container(
+    margin: EdgeInsets.symmetric(vertical: eqW(8), horizontal: eqW(6)),
+    decoration: BoxDecoration(
+      color: kSecondaryColor,
+      borderRadius: BorderRadius.circular(eqW(8)),
+    ),
+    height: 90, // stable height = no layout jump
+    child: AdWidget(ad: _nativeAd!),
+  );
+}
+
+
 }
 
 /// MatchDetailsPage
@@ -589,6 +692,9 @@ class _MatchDetailsPageState extends State<MatchDetailsPage> {
 
   final DateFormat _dateFmt = DateFormat.yMMMMd();
   final DateFormat _timeFmt = DateFormat('hh:mm a');
+  late BannerAd _bannerAd;
+  bool _isBannerLoaded = false;
+
 
   @override
   void initState() {
@@ -599,6 +705,26 @@ class _MatchDetailsPageState extends State<MatchDetailsPage> {
         .collection('matches')
         .doc(widget.matchId)
         .snapshots();
+
+         _bannerAd = BannerAd(
+    adUnitId: 'ca-app-pub-3940256099942544/6300978111', // TEST banner
+    size: AdSize.banner,
+    request: const AdRequest(),
+    listener: BannerAdListener(
+      onAdLoaded: (_) {
+        if (mounted) {
+          setState(() => _isBannerLoaded = true);
+        }
+      },
+      onAdFailedToLoad: (ad, error) {
+        ad.dispose();
+        debugPrint('Match details banner failed: $error');
+      },
+    ),
+  );
+
+  _bannerAd.load();
+
 
     final initial = widget.initialMatchData;
     if (initial != null) {
@@ -628,6 +754,11 @@ class _MatchDetailsPageState extends State<MatchDetailsPage> {
       return null;
     }
   }
+@override
+void dispose() {
+  _bannerAd.dispose();
+  super.dispose();
+}
 
   @override
   Widget build(BuildContext context) {
@@ -655,8 +786,10 @@ class _MatchDetailsPageState extends State<MatchDetailsPage> {
                     ),
                   ],
                 ),
+                
               ),
             ),
+            
           );
         }
 
@@ -782,6 +915,13 @@ class _MatchDetailsPageState extends State<MatchDetailsPage> {
               ],
             ],
           ),
+            bottomNavigationBar: _isBannerLoaded
+      ? SizedBox(
+          height: _bannerAd.size.height.toDouble(),
+          width: _bannerAd.size.width.toDouble(),
+          child: AdWidget(ad: _bannerAd),
+        )
+      : null,
         );
       },
     );
@@ -828,5 +968,9 @@ class _MatchDetailsPageState extends State<MatchDetailsPage> {
         ),
       ],
     );
+
+    
   }
+  
+
 }

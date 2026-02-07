@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:kklivescoreadmin/constants/colors.dart';
 import 'package:kklivescoreadmin/constants/size.dart';
 import 'package:kklivescoreadmin/constants/text_styles.dart';
@@ -21,12 +22,35 @@ class _PublicHomePageState extends State<PublicHomePage>
     with SingleTickerProviderStateMixin {
   String? selectedLeagueId;
   late TabController _tabController;
+  late BannerAd _bannerAd;
+  bool _isBannerAdLoaded = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 5, vsync: this);
-  }
+
+
+@override
+void initState() {
+  super.initState();
+  _tabController = TabController(length: 5, vsync: this);
+
+  _bannerAd = BannerAd(
+    adUnitId: 'ca-app-pub-7769762821516033/3319422467', // Banner ID
+    size: AdSize.banner,
+    request: const AdRequest(),
+    listener: BannerAdListener(
+    onAdLoaded: (_) {
+        setState(() {
+          _isBannerAdLoaded = true;
+        });
+      },
+      onAdFailedToLoad: (ad, error) {
+        ad.dispose();
+        debugPrint('Banner failed to load: $error');
+      },
+    ),
+  );
+
+  _bannerAd.load();
+}
 
   // ------------------ EXIT APP ------------------ //
   void _exitApp() {
@@ -233,71 +257,72 @@ class _PublicHomePageState extends State<PublicHomePage>
       ),
 
       // ================= Tabs ================= //
-      body: Column(
-        children: [
-          Material(
-            color: kSecondaryColor,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                labelColor: kWhiteColor,
-                unselectedLabelColor: kGrey2,
-                indicatorColor: kPrimaryLight,
-                tabs: const [
-                  Tab(text: "MATCHES"),
-                  Tab(text: "TEAMS"),
-                  Tab(text: "COACHES"),
-                  Tab(text: "STANDINGS"),
-                  Tab(text: "NEWS"),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: selectedLeagueId == null
-                ? Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(eqW(12)),
-                      child: Text(
-                        "Please select a league above",
-                        style: kText12White,
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  )
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      // MatchesTab accepts an optional stream; we pass the plural path stream (works with your MatchesTab defensive code)
-                      MatchesTab(
-                        leagueId: selectedLeagueId!,
-                        matchesStream: FirebaseFirestore.instance
-                            .collection('leagues')
-                            .doc(selectedLeagueId)
-                            .collection('matches')
-                            .snapshots(),
-                      ),
-
-                      TeamsTab(
-                        leagueId: selectedLeagueId!,
-                      ),
-                      CoachesTab(
-                        leagueId: selectedLeagueId!,
-                      ),
-                      StandingsTab(
-                        leagueId: selectedLeagueId!,
-                      ),
-                      NewsTab(
-                        leagueId: selectedLeagueId!,
-                      ),
-
-                    ],
-                  ),
-          ),
-        ],
+body: Column(
+  children: [
+    // Tabs
+    Material(
+      color: kSecondaryColor,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          labelColor: kWhiteColor,
+          unselectedLabelColor: kGrey2,
+          indicatorColor: kPrimaryLight,
+          tabs: const [
+            Tab(text: "MATCHES"),
+            Tab(text: "TEAMS"),
+            Tab(text: "COACHES"),
+            Tab(text: "STANDINGS"),
+            Tab(text: "NEWS"),
+          ],
+        ),
       ),
+    ),
+
+    // Main content
+    Expanded(
+      child: selectedLeagueId == null
+          ? Center(
+              child: Padding(
+                padding: EdgeInsets.all(eqW(12)),
+                child: Text(
+                  "Please select a league above",
+                  style: kText12White,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                MatchesTab(
+                  leagueId: selectedLeagueId!,
+                  matchesStream: FirebaseFirestore.instance
+                      .collection('leagues')
+                      .doc(selectedLeagueId)
+                      .collection('matches')
+                      .snapshots(),
+                ),
+                TeamsTab(leagueId: selectedLeagueId!),
+                CoachesTab(leagueId: selectedLeagueId!),
+                StandingsTab(leagueId: selectedLeagueId!),
+                NewsTab(leagueId: selectedLeagueId!),
+              ],
+            ),
+    ),
+
+    // 🔥 BANNER AD (SAFE POSITION)
+    if (_isBannerAdLoaded)
+      SizedBox(
+        height: _bannerAd.size.height.toDouble(),
+        width: _bannerAd.size.width.toDouble(),
+        child: AdWidget(ad: _bannerAd),
+      ),
+  ],
+),
+
 
       // ============= Bottom Navigation ============= //
       bottomNavigationBar: BottomNavigationBar(
@@ -316,6 +341,13 @@ class _PublicHomePageState extends State<PublicHomePage>
       ),
     );
   }
+  @override
+void dispose() {
+  _bannerAd.dispose();
+  _tabController.dispose();
+  super.dispose();
+}
+
 }
 
 // ----------------------------------------------
