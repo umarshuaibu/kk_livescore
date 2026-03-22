@@ -1,10 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:kklivescoreadmin/constants/colors.dart';
 import 'package:kklivescoreadmin/constants/size.dart';
 import 'package:kklivescoreadmin/constants/text_styles.dart';
+import 'package:kklivescoreadmin/fans/reusables/bracket_view_tab.dart';
 import 'package:kklivescoreadmin/fans/reusables/coaches_tab.dart';
 import 'package:kklivescoreadmin/fans/reusables/matches_tab.dart';
 import 'package:kklivescoreadmin/fans/reusables/news_tab.dart';
@@ -21,36 +22,35 @@ class PublicHomePage extends StatefulWidget {
 class _PublicHomePageState extends State<PublicHomePage>
     with SingleTickerProviderStateMixin {
   String? selectedLeagueId;
+  String? selectedLeagueMatchSystem; // Tracks "Knockout" or other
   late TabController _tabController;
   late BannerAd _bannerAd;
   bool _isBannerAdLoaded = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 5, vsync: this);
 
+    _bannerAd = BannerAd(
+      adUnitId: 'ca-app-pub-7769762821516033/3319422467', // Banner ID
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          setState(() {
+            _isBannerAdLoaded = true;
+          });
+        },
+        onAdFailedToLoad: (ad, error) {
+          ad.dispose();
+          debugPrint('Banner failed to load: $error');
+        },
+      ),
+    );
 
-@override
-void initState() {
-  super.initState();
-  _tabController = TabController(length: 5, vsync: this);
-
-  _bannerAd = BannerAd(
-    adUnitId: 'ca-app-pub-7769762821516033/3319422467', // Banner ID
-    size: AdSize.banner,
-    request: const AdRequest(),
-    listener: BannerAdListener(
-    onAdLoaded: (_) {
-        setState(() {
-          _isBannerAdLoaded = true;
-        });
-      },
-      onAdFailedToLoad: (ad, error) {
-        ad.dispose();
-        debugPrint('Banner failed to load: $error');
-      },
-    ),
-  );
-
-  _bannerAd.load();
-}
+    _bannerAd.load();
+  }
 
   // ------------------ EXIT APP ------------------ //
   void _exitApp() {
@@ -68,10 +68,12 @@ void initState() {
   // ------------------ FETCH LEAGUES (plural then singular fallback) ------------------ //
   Future<List<QueryDocumentSnapshot>> _fetchLeaguesDocs() async {
     try {
-      final pluralSnap = await FirebaseFirestore.instance.collection('leagues').get();
+      final pluralSnap =
+          await FirebaseFirestore.instance.collection('leagues').get();
       if (pluralSnap.docs.isNotEmpty) return pluralSnap.docs;
 
-      final singularSnap = await FirebaseFirestore.instance.collection('league').get();
+      final singularSnap =
+          await FirebaseFirestore.instance.collection('league').get();
       return singularSnap.docs;
     } catch (e) {
       debugPrint('[PublicHomePage] _fetchLeaguesDocs failed: $e');
@@ -79,78 +81,10 @@ void initState() {
     }
   }
 
-/*
-  // ------------------ FETCH STATS (handles both 'leagues' and 'league' roots) ------------------ //
-  Future<List<Map<String, dynamic>>> _fetchStats() async {
-    if (selectedLeagueId == null) return [];
-
-    
-    // Try plural path first, then singular
-    QuerySnapshot matchesSnap;
-    try {
-      matchesSnap = await FirebaseFirestore.instance
-          .collection('leagues')
-          .doc(selectedLeagueId)
-          .collection('matches')
-          .get();
-    } catch (e) {
-      debugPrint('Failed reading matches from "leagues": $e');
-      matchesSnap = QuerySnapshot<Map<String, dynamic>>(
-        // create an empty synthetic snapshot when read fails to allow fallback
-        // Note: constructing QuerySnapshot directly is not public API; instead fallback by catching below
-        // So we will attempt the fallback read below
-        const [],
-        SnapshotMetadata(false, false),
-      );
-    }
-
-    // If plural read returned zero docs, try singular path
-    if (matchesSnap.docs.isEmpty) {
-      try {
-        matchesSnap = await FirebaseFirestore.instance
-            .collection('league')
-            .doc(selectedLeagueId)
-            .collection('matches')
-            .get();
-      } catch (e) {
-        debugPrint('Failed reading matches from "league": $e');
-        // give up and return empty stats
-        return [];
-      }
-    }
-
-    final allStats = <Map<String, dynamic>>[];
-
-    for (var match in matchesSnap.docs) {
-      try {
-        final events = await match.reference.collection("events").get();
-        for (var e in events.docs) {
-          final map = e.data() as Map<String, dynamic>;
-          // Defensive copy and sanitize: remove any raw internal IDs before aggregating
-          final safe = Map<String, dynamic>.from(map);
-          safe.removeWhere((k, v) => k.toLowerCase().contains('id') && k != 'playerId'); // keep domain ids if needed, but avoid exposing later
-          allStats.add(safe);
-        }
-      } catch (e) {
-        debugPrint('Failed to fetch events for match ${match.id}: $e');
-        // skip this match's events on error to avoid exposing error details to user
-        continue;
-      }
-    }
-
-    return allStats;
-  }
-  */
-
-  // ====================================================== //
-  // ======================= UI ============================ //
-  // ====================================================== //
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kPrimaryColor,
-      // remove the back arrow for this screen
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: const Text("KK LIVESCORE"),
@@ -161,7 +95,6 @@ void initState() {
           FutureBuilder<List<QueryDocumentSnapshot>>(
             future: _fetchLeaguesDocs(),
             builder: (context, snapshot) {
-              // Friendly, non-technical error handling
               if (snapshot.hasError) {
                 return Padding(
                   padding: EdgeInsets.symmetric(horizontal: eqW(8)),
@@ -200,19 +133,25 @@ void initState() {
 
               final leagues = snapshot.data!;
 
-              // If previously selected league is no longer present, clear selection (safe post-frame)
-              final bool selectedStillPresent =
-                  selectedLeagueId != null && leagues.any((d) => d.id == selectedLeagueId);
+              // Clear selection if league no longer exists
+              final bool selectedStillPresent = selectedLeagueId != null &&
+                  leagues.any((d) => d.id == selectedLeagueId);
               if (!selectedStillPresent && selectedLeagueId != null) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) setState(() => selectedLeagueId = null);
+                  if (mounted) {
+                    setState(() {
+                      selectedLeagueId = null;
+                      selectedLeagueMatchSystem = null;
+                    });
+                  }
                 });
               }
 
               if (leagues.isEmpty) {
                 return Padding(
                   padding: EdgeInsets.symmetric(horizontal: eqW(12)),
-                  child: Center(child: Text('No leagues available', style: kText12White)),
+                  child:
+                      Center(child: Text('No leagues available', style: kText12White)),
                 );
               }
 
@@ -229,9 +168,10 @@ void initState() {
                   ),
                   items: leagues.map((doc) {
                     final data = doc.data() as Map<String, dynamic>? ?? {};
-                    final displayName = (data['name']?.toString().trim().isNotEmpty == true)
-                        ? data['name'].toString()
-                        : 'Unnamed League';
+                    final displayName =
+                        (data['name']?.toString().trim().isNotEmpty == true)
+                            ? data['name'].toString()
+                            : 'Unnamed League';
                     return DropdownMenuItem(
                       value: doc.id,
                       child: Text(
@@ -241,10 +181,15 @@ void initState() {
                     );
                   }).toList(),
                   onChanged: (val) {
-                    // Only store id internally; ensure we don't display raw ids elsewhere
+                    if (val == null) return;
+                    final leagueData = leagues
+                        .firstWhere((d) => d.id == val)
+                        .data() as Map<String, dynamic>?;
+
                     setState(() {
                       selectedLeagueId = val;
-                      // when user switches league, move to first tab (matches) for better UX
+                      selectedLeagueMatchSystem =
+                          leagueData?['MatchesSystem']?.toString() ?? 'Home_and_away';
                       _tabController.animateTo(0);
                     });
                   },
@@ -256,73 +201,77 @@ void initState() {
         ],
       ),
 
-      // ================= Tabs ================= //
-body: Column(
-  children: [
-    // Tabs
-    Material(
-      color: kSecondaryColor,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          labelColor: kWhiteColor,
-          unselectedLabelColor: kGrey2,
-          indicatorColor: kPrimaryLight,
-          tabs: const [
-            Tab(text: "MATCHES"),
-            Tab(text: "TEAMS"),
-            Tab(text: "COACHES"),
-            Tab(text: "STANDINGS"),
-            Tab(text: "NEWS"),
-          ],
-        ),
-      ),
-    ),
-
-    // Main content
-    Expanded(
-      child: selectedLeagueId == null
-          ? Center(
-              child: Padding(
-                padding: EdgeInsets.all(eqW(12)),
-                child: Text(
-                  "Please select a league above",
-                  style: kText12White,
-                  textAlign: TextAlign.center,
-                ),
+      body: Column(
+        children: [
+          // Tabs
+          Material(
+            color: kSecondaryColor,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                labelColor: kWhiteColor,
+                unselectedLabelColor: kGrey2,
+                indicatorColor: kPrimaryLight,
+                tabs: const [
+                  Tab(text: "MATCHES"),
+                  Tab(text: "TEAMS"),
+                  Tab(text: "COACHES"),
+                  Tab(text: "STANDINGS"),
+                  Tab(text: "NEWS"),
+                ],
               ),
-            )
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                MatchesTab(
-                  leagueId: selectedLeagueId!,
-                  matchesStream: FirebaseFirestore.instance
-                      .collection('leagues')
-                      .doc(selectedLeagueId)
-                      .collection('matches')
-                      .snapshots(),
-                ),
-                TeamsTab(leagueId: selectedLeagueId!),
-                CoachesTab(leagueId: selectedLeagueId!),
-                StandingsTab(leagueId: selectedLeagueId!),
-                NewsTab(leagueId: selectedLeagueId!),
-              ],
             ),
-    ),
+          ),
 
-    // 🔥 BANNER AD (SAFE POSITION)
-    if (_isBannerAdLoaded)
-      SizedBox(
-        height: _bannerAd.size.height.toDouble(),
-        width: _bannerAd.size.width.toDouble(),
-        child: AdWidget(ad: _bannerAd),
+          // Main content
+          Expanded(
+            child: selectedLeagueId == null
+                ? Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(eqW(12)),
+                      child: Text(
+                        "Please select a league above",
+                        style: kText12White,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : TabBarView(
+                    controller: _tabController,
+                    children: [
+                      MatchesTab(
+                        leagueId: selectedLeagueId!,
+                        matchesStream: FirebaseFirestore.instance
+                            .collection('leagues')
+                            .doc(selectedLeagueId)
+                            .collection('matches')
+                            .snapshots(),
+                      ),
+                      TeamsTab(leagueId: selectedLeagueId!),
+                      CoachesTab(leagueId: selectedLeagueId!),
+
+                      /// ------------------ STANDINGS OR BRACKET ------------------ ///
+                      if (selectedLeagueMatchSystem == 'Knockout')
+                        BracketViewTab(leagueId: selectedLeagueId!)
+                      else
+                        StandingsTab(leagueId: selectedLeagueId!),
+
+                      NewsTab(leagueId: selectedLeagueId!),
+                    ],
+                  ),
+          ),
+
+          // 🔥 BANNER AD
+          if (_isBannerAdLoaded)
+            SizedBox(
+              height: _bannerAd.size.height.toDouble(),
+              width: _bannerAd.size.width.toDouble(),
+              child: AdWidget(ad: _bannerAd),
+            ),
+        ],
       ),
-  ],
-),
-
 
       // ============= Bottom Navigation ============= //
       bottomNavigationBar: BottomNavigationBar(
@@ -341,13 +290,13 @@ body: Column(
       ),
     );
   }
-  @override
-void dispose() {
-  _bannerAd.dispose();
-  _tabController.dispose();
-  super.dispose();
-}
 
+  @override
+  void dispose() {
+    _bannerAd.dispose();
+    _tabController.dispose();
+    super.dispose();
+  }
 }
 
 // ----------------------------------------------

@@ -1,5 +1,8 @@
 // Helpers to generate round-robin pairings
 
+import 'package:kklivescoreadmin/league_manager/league_initialization_screen.dart';
+import 'package:kklivescoreadmin/league_manager/manual_pairing.dart';
+
 List<List<String>> singleRoundRobin(List<String> teams) {
   // Standard circle method
   final n = teams.length;
@@ -30,4 +33,22 @@ List<List<String>> doubleRoundRobin(List<String> teams) {
   final first = singleRoundRobin(teams);
   final reversed = first.map((pair) => [pair[1], pair[0]]).toList();
   return [...first, ...reversed];
+}
+
+/// ------------------ UPDATED: Knockout Tournament ------------------
+/// Accepts initial manual pairs instead of randomizing.
+/// Returns a flat list of matches ready for scheduling.
+List<PlannedMatch> knockoutTournamentFromManual(List<Map<String, dynamic>> manualPairs) {
+  final allMatches = generateKnockoutRounds(manualPairs);
+  final List<PlannedMatch> planned = [];
+
+  for (final m in allMatches) {
+    planned.add(PlannedMatch(
+      group: '', // No group in knockout
+      teamAId: m['teamAId'] as String,
+      teamBId: m['teamBId'] as String,
+    ));
+  }
+
+  return planned;
 }

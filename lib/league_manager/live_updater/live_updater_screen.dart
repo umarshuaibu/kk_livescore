@@ -374,7 +374,7 @@ Future<void> _markMatchCompleted() async {
       title: const Text('Mark Completed'),
       content: const Text(
         'Are you sure you want to mark this match as completed?\n'
-        'This action will update standings.',
+        'This action will update standings or bracket progress.',
       ),
       actions: [
         TextButton(
@@ -406,28 +406,70 @@ Future<void> _markMatchCompleted() async {
   final int scoreB = match['scoreB'] ?? 0;
   final String teamAId = match['teamAId'];
   final String teamBId = match['teamBId'];
-  final String groupId = match['group'];
+  final String groupId = match['group'] ?? '';
 
-  // 🔄 Update standings for both teams
-  await Future.wait([
-    _updateStandings(
-      leagueId: widget.leagueId,
-      teamId: teamAId,
-      groupId: groupId,
-      goalsFor: scoreA,
-      goalsAgainst: scoreB,
-    ),
-    _updateStandings(
-      leagueId: widget.leagueId,
-      teamId: teamBId,
-      groupId: groupId,
-      goalsFor: scoreB,
-      goalsAgainst: scoreA,
-    ),
-  ]);
+  // 🔹 Fetch league type to branch logic
+  final leagueSnap = await _firestore.collection('leagues').doc(widget.leagueId).get();
+  final leagueData = leagueSnap.data();
+  final String leagueType = leagueData?['type'] ?? 'home_and_away';
 
-  // ✅ Mark match as completed
-  await matchRef.update({'status': 'completed'});
+  if (leagueType == 'knockout') {
+    // -----------------------------
+    // 🏆 Knockout league logic
+    // -----------------------------
+    final String winnerId = scoreA > scoreB ? teamAId : teamBId;
+
+    await _firestore.runTransaction((tx) async {
+      // Update match doc with winner
+      tx.update(matchRef, {
+        'status': 'completed',
+        'winnerId': winnerId,
+        'scoreA': scoreA,
+        'scoreB': scoreB,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+
+      // Update bracket summary
+      final bracketSummaryRef = _firestore
+          .collection('leagues')
+          .doc(widget.leagueId)
+          .collection('bracketSummary')
+          .doc('summary');
+
+      final bracketSnap = await tx.get(bracketSummaryRef);
+      if (bracketSnap.exists) {
+        final data = bracketSnap.data()!;
+        final List<String> teamsRemaining = List<String>.from(data['teamsRemaining'] ?? []);
+        // Remove losing team
+        teamsRemaining.removeWhere((id) => id != winnerId);
+        tx.update(bracketSummaryRef, {
+          'teamsRemaining': teamsRemaining,
+          'lastUpdated': FieldValue.serverTimestamp(),
+        });
+      }
+    });
+  } else {
+    // -----------------------------
+    // ⚽ Home & Away or Away Only logic
+    // -----------------------------
+    await Future.wait([
+      _updateStandings(
+        leagueId: widget.leagueId,
+        teamId: teamAId,
+        groupId: groupId,
+        goalsFor: scoreA,
+        goalsAgainst: scoreB,
+      ),
+      _updateStandings(
+        leagueId: widget.leagueId,
+        teamId: teamBId,
+        groupId: groupId,
+        goalsFor: scoreB,
+        goalsAgainst: scoreA,
+      ),
+      matchRef.update({'status': 'completed', 'lastUpdated': FieldValue.serverTimestamp()}),
+    ]);
+  }
 
   if (mounted) {
     Navigator.of(context).popUntil((route) => route.isFirst);
@@ -436,112 +478,181 @@ Future<void> _markMatchCompleted() async {
 
 
   /// Record event and update counters
-  Future<void> _recordEvent() async {
-    if (_selectedTeamId == null) {
-      await CustomDialog.show(context, title: 'Missing', message: 'Please select a team', type: DialogType.error);
-      return;
-    }
-
-    final matchRef = _firestore
-        .collection('leagues')
-        .doc(widget.leagueId)
-        .collection('matches')
-        .doc(widget.matchId);
-
-    final isTeamA = _selectedTeamId == _teamAId;
-
-    final eventId = _firestore.collection('tmp').doc().id;
-
-    final Map<String, dynamic> eventDoc = {
-      'id': eventId,
-      'type': _selectedEvent,
-      'teamId': _selectedTeamId,
-      'timestamp': FieldValue.serverTimestamp(),
-    };
-
-    // handle substitution differently
-    if (_selectedEvent == 'Substitution') {
-      if (_selectedPlayerOutId == null || _selectedPlayerInId == null) {
-        await CustomDialog.show(context, title: 'Missing', message: 'Select both player out & player in', type: DialogType.error);
-        return;
-      }
-      eventDoc['out'] = _selectedPlayerOutId;
-      eventDoc['in'] = _selectedPlayerInId;
-
-      // increment subsA / subsB
-      final field = isTeamA ? 'subsA' : 'subsB';
-      await _firestore.runTransaction((tx) async {
-        tx.set(matchRef.collection('events').doc(eventId), eventDoc);
-        tx.update(matchRef, {field: FieldValue.increment(1)});
-      });
-
-      // optionally update any lineup state if needed (not done here)
-        if (!mounted) return;
-      await CustomDialog.show(context, title: 'Recorded', message: 'Substitution recorded', type: DialogType.success);
-      return;
-    }
-
-    // non substitution events: player selection required
-    if (_selectedPlayerId == null) {
-      await CustomDialog.show(context, title: 'Missing', message: 'Please select a player', type: DialogType.error);
-      return;
-    }
-
-    eventDoc['playerId'] = _selectedPlayerId;
-
-    // Determine which match fields to update
-    String? counterField;
-    Map<String, dynamic> updateMap = {};
-
-    switch (_selectedEvent) {
-      case 'Goal +1':
-        counterField = isTeamA ? 'scoreA' : 'scoreB';
-        updateMap[counterField] = FieldValue.increment(1);
-        break;
-      case 'Goal -1':
-        counterField = isTeamA ? 'scoreA' : 'scoreB';
-        updateMap[counterField] = FieldValue.increment(-1);
-        break;
-      case 'Yellow Card':
-        counterField = isTeamA ? 'yellowA' : 'yellowB';
-        updateMap[counterField] = FieldValue.increment(1);
-        break;
-      case 'Red Card':
-        counterField = isTeamA ? 'redA' : 'redB';
-        updateMap[counterField] = FieldValue.increment(1);
-        break;
-      default:
-        // unknown event
-        break;
-    }
-
-    // Use transaction to write event and update counters atomically
-    try {
-      await _firestore.runTransaction((tx) async {
-        final matchSnapshot = await tx.get(matchRef);
-        // make sure doc exists
-        if (!matchSnapshot.exists) {
-          throw Exception('Match not found');
-        }
-        tx.set(matchRef.collection('events').doc(eventId), eventDoc);
-        if (updateMap.isNotEmpty) {
-          tx.update(matchRef, updateMap);
-        }
-      });
-          if (!mounted) return; // ✅ Prevent using context if widget is disposed
-      await CustomDialog.show(context, title: 'Success', message: 'Event recorded', type: DialogType.success);
-
-      // reset selection of players for next event
-      setState(() {
-        _selectedPlayerId = null;
-        _selectedPlayerInId = null;
-        _selectedPlayerOutId = null;
-      });
-    } catch (e) {
-        if (!mounted) return; // ✅ Prevent using context if widget is disposed
-      await CustomDialog.show(context, title: 'Error', message: 'Failed to record event: $e', type: DialogType.error);
-    }
+ Future<void> _recordEvent() async {
+  if (_selectedTeamId == null) {
+    await CustomDialog.show(
+      context,
+      title: 'Missing',
+      message: 'Please select a team',
+      type: DialogType.error,
+    );
+    return;
   }
+
+  final matchRef = _firestore
+      .collection('leagues')
+      .doc(widget.leagueId)
+      .collection('matches')
+      .doc(widget.matchId);
+
+  final isTeamA = _selectedTeamId == _teamAId;
+
+  final eventId = _firestore.collection('tmp').doc().id;
+
+  final Map<String, dynamic> eventDoc = {
+    'id': eventId,
+    'type': _selectedEvent,
+    'teamId': _selectedTeamId,
+    'timestamp': FieldValue.serverTimestamp(),
+  };
+
+  // handle substitution differently
+  if (_selectedEvent == 'Substitution') {
+    if (_selectedPlayerOutId == null || _selectedPlayerInId == null) {
+      await CustomDialog.show(
+          context,
+          title: 'Missing',
+          message: 'Select both player out & player in',
+          type: DialogType.error);
+      return;
+    }
+    eventDoc['out'] = _selectedPlayerOutId;
+    eventDoc['in'] = _selectedPlayerInId;
+
+    final field = isTeamA ? 'subsA' : 'subsB';
+    await _firestore.runTransaction((tx) async {
+      tx.set(matchRef.collection('events').doc(eventId), eventDoc);
+      tx.update(matchRef, {field: FieldValue.increment(1)});
+    });
+
+    if (!mounted) return;
+    await CustomDialog.show(
+      context,
+      title: 'Recorded',
+      message: 'Substitution recorded',
+      type: DialogType.success,
+    );
+    return;
+  }
+
+  // non substitution events: player selection required
+  if (_selectedPlayerId == null) {
+    await CustomDialog.show(
+        context,
+        title: 'Missing',
+        message: 'Please select a player',
+        type: DialogType.error);
+    return;
+  }
+
+  eventDoc['playerId'] = _selectedPlayerId;
+
+  // Determine which match fields to update
+  String? counterField;
+  Map<String, dynamic> updateMap = {};
+
+  switch (_selectedEvent) {
+    case 'Goal +1':
+      counterField = isTeamA ? 'scoreA' : 'scoreB';
+      updateMap[counterField] = FieldValue.increment(1);
+      break;
+    case 'Goal -1':
+      counterField = isTeamA ? 'scoreA' : 'scoreB';
+      updateMap[counterField] = FieldValue.increment(-1);
+      break;
+    case 'Yellow Card':
+      counterField = isTeamA ? 'yellowA' : 'yellowB';
+      updateMap[counterField] = FieldValue.increment(1);
+      break;
+    case 'Red Card':
+      counterField = isTeamA ? 'redA' : 'redB';
+      updateMap[counterField] = FieldValue.increment(1);
+      break;
+    default:
+      break;
+  }
+
+  try {
+    // 🔹 Fetch league type first
+    final leagueSnap = await _firestore.collection('leagues').doc(widget.leagueId).get();
+    final leagueType = leagueSnap.data()?['type'] ?? 'home_and_away';
+
+    await _firestore.runTransaction((tx) async {
+      final matchSnapshot = await tx.get(matchRef);
+      if (!matchSnapshot.exists) throw Exception('Match not found');
+
+      tx.set(matchRef.collection('events').doc(eventId), eventDoc);
+
+      if (updateMap.isNotEmpty) tx.update(matchRef, updateMap);
+
+      // -----------------------------
+      // 🏆 Knockout live update
+      // -----------------------------
+      if (leagueType == 'knockout' && _selectedEvent.startsWith('Goal')) {
+        final matchData = matchSnapshot.data()!;
+        final int currentScoreA = (updateMap['scoreA'] != null)
+            ? (matchData['scoreA'] ?? 0) + (isTeamA ? 1 : 0)
+            : matchData['scoreA'] ?? 0;
+
+        final int currentScoreB = (updateMap['scoreB'] != null)
+            ? (matchData['scoreB'] ?? 0) + (isTeamA ? 0 : 1)
+            : matchData['scoreB'] ?? 0;
+
+        final String winnerId = currentScoreA > currentScoreB
+            ? matchData['teamAId']
+            : matchData['teamBId'];
+
+        // Update bracket summary in real-time
+        final bracketSummaryRef = _firestore
+            .collection('leagues')
+            .doc(widget.leagueId)
+            .collection('bracketSummary')
+            .doc('summary');
+
+        final bracketSnap = await tx.get(bracketSummaryRef);
+        if (bracketSnap.exists) {
+          final data = bracketSnap.data()!;
+          final List<String> teamsRemaining = List<String>.from(data['teamsRemaining'] ?? []);
+
+          // Only remove losing team if still present
+          final losingTeam = winnerId == matchData['teamAId']
+              ? matchData['teamBId']
+              : matchData['teamAId'];
+          teamsRemaining.removeWhere((id) => id == losingTeam);
+
+          tx.update(bracketSummaryRef, {
+            'teamsRemaining': teamsRemaining,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    });
+
+    if (!mounted) return;
+
+    await CustomDialog.show(
+      context,
+      title: 'Success',
+      message: 'Event recorded',
+      type: DialogType.success,
+    );
+
+    // reset selections
+    setState(() {
+      _selectedPlayerId = null;
+      _selectedPlayerInId = null;
+      _selectedPlayerOutId = null;
+    });
+  } catch (e) {
+    if (!mounted) return;
+    await CustomDialog.show(
+        context,
+        title: 'Error',
+        message: 'Failed to record event: $e',
+        type: DialogType.error);
+  }
+}
+
 
   // Build team status card from live match doc snapshot
   Widget _buildTeamsStatusCard(DocumentSnapshot matchSnapshot) {
