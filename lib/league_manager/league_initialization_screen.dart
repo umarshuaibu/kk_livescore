@@ -458,17 +458,167 @@ class _LeagueInitializationScreenState
     );
   }
 
-  // ---------------- THE REST OF UI ----------------
-  Widget _buildInitializationView() {
-    // same as your original, no change needed for this snippet
-    // just make sure ManualPairing calls use isKnockout: true if league is knockout
-    // And add buttons like INITIALIZE LEAGUE NOW
-    return Column(); // placeholder
+Widget _buildInitializationView() {
+  final matchesSystem = _leagueData?['MatchesSystem'] as String? ?? 'Home_and_away';
+  final isKnockout = matchesSystem == 'Knockout';
+
+  if (isKnockout) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Select teams for Knockout League:',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: _availableTeamDocs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final teamId = data['teamId'] as String? ?? doc.id;
+            final teamName = data['name'] as String? ?? doc.id;
+            final selected = _assignedTeamsSet.contains(teamId);
+            final isInManualPair = _manualPairs.any(
+                (p) => p['teams'].contains(teamId));
+
+            return ChoiceChip(
+              label: Text(teamName),
+              selected: selected || isInManualPair,
+              onSelected: (_) {
+                if (!selected && !isInManualPair) {
+                  _toggleTeamForGroup('knockout', teamId);
+                } else if (selected) {
+                  _toggleTeamForGroup('knockout', teamId);
+                }
+              },
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 16),
+
+        // Manual pairing builder
+        const Text('Manual Pairs (tap to remove):',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: _manualPairs.map((pair) {
+            final teamNames = pair['teams']
+                .map((tid) => _teamIdToName[tid] ?? tid)
+                .join(' vs ');
+            return InputChip(
+              label: Text(teamNames),
+              onDeleted: () {
+                setState(() {
+                  for (final t in pair['teams']) {
+                    _assignedTeamsSet.remove(t);
+                  }
+                  _manualPairs.remove(pair);
+                });
+              },
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 16),
+
+        // Button to create pair from selected teams
+        if (_assignedTeamsSet.length >= 2)
+          ElevatedButton(
+            onPressed: () {
+              final selectedList = _assignedTeamsSet.toList();
+              final pairTeams = selectedList.take(2).toList();
+              setState(() {
+                _manualPairs.add({'group': 'knockout', 'teams': pairTeams});
+                for (final t in pairTeams) {
+                  _assignedTeamsSet.remove(t);
+                }
+              });
+            },
+            child: const Text('Create Pair'),
+          ),
+
+        const SizedBox(height: 16),
+        OutlinedButton(
+          onPressed: _pickStartingDate,
+          child: Text(_startingDate == null
+              ? 'Pick Starting Date'
+              : 'Start Date: ${_startingDate!.toLocal()}'.split(' ')[0]),
+        ),
+        const SizedBox(height: 16),
+        ElevatedButton(
+          onPressed: _manualPairs.isEmpty || _startingDate == null
+              ? null
+              : _initializeManual,
+          child: const Text('INITIALIZE KNOCKOUT LEAGUE'),
+        ),
+      ],
+    );
   }
 
-  Widget _buildActiveView() {
-    return SingleChildScrollView(); // placeholder
+  // Default: group-based initialization
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('Group-based league initialization UI'),
+      // your original group-based team selection UI here
+    ],
+  );
+}
+
+
+Widget _buildActiveView() {
+  final matchesSystem = _leagueData?['MatchesSystem'] as String? ?? 'Home_and_away';
+  final isKnockout = matchesSystem == 'Knockout';
+
+  if (isKnockout) {
+    return FutureBuilder<List<QueryDocumentSnapshot>>(
+      future: _firestoreService.fetchMatches(widget.leagueId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(child: Text('No matches scheduled yet.'));
+        }
+
+        final matches = snapshot.data!;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Knockout Matches:',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            ...matches.map((m) {
+              final teamA = _teamIdToName[m['teamAId']] ?? m['teamAId'];
+              final teamB = _teamIdToName[m['teamBId']] ?? m['teamBId'];
+              final date = m['date'] != null
+                  ? (m['date'] as Timestamp).toDate()
+                  : null;
+              return Card(
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                child: ListTile(
+                  title: Text('$teamA vs $teamB'),
+                  subtitle: date != null
+                      ? Text('Date: ${date.toLocal()}'.split(' ')[0])
+                      : null,
+                  trailing: Text(m['status'] ?? ''),
+                ),
+              );
+            }).toList(),
+          ],
+        );
+      },
+    );
   }
+
+  // Default: group-based active view
+  return Column(
+    children: [
+      const Text('Group-based matches view'),
+      // your original group matches list
+    ],
+  );
+}
 }
 
 // ----------------- Planned Match -----------------

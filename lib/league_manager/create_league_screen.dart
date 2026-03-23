@@ -171,8 +171,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen> {
         content: DropdownButtonFormField<String>(
           value: _matchesSystem,
           items: const [
-            DropdownMenuItem(
-                value: 'Home_and_away', child: Text('Home and away')),
+            DropdownMenuItem(value: 'Home_and_away', child: Text('Home and away')),
             DropdownMenuItem(value: 'Away_only', child: Text('Away only')),
             DropdownMenuItem(value: 'Knockout', child: Text('Knockout')),
           ],
