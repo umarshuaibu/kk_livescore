@@ -133,149 +133,162 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen> {
   }
 
   List<Step> _buildSteps() {
-    final steps = <Step>[
-      Step(
-        title: const Text('League Info'),
-        isActive: _currentStep >= 0,
-        state: StepState.indexed,
-        content: Column(
-          children: [
-            TextField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'League Name')),
-            TextField(
-                controller: _seasonController,
-                decoration: const InputDecoration(labelText: 'Season')),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    initialValue: _logoUrl,
-                    decoration: const InputDecoration(labelText: 'Logo URL'),
-                    readOnly: true,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                    onPressed: _pickAndUploadLogo, child: const Text('Upload')),
-              ],
-            ),
-          ],
-        ),
-      ),
-      Step(
-        title: const Text('Match System'),
-        isActive: _currentStep >= 1,
-        state: StepState.indexed,
-        content: DropdownButtonFormField<String>(
-          value: _matchesSystem,
-          items: const [
-            DropdownMenuItem(value: 'Home_and_away', child: Text('Home and away')),
-            DropdownMenuItem(value: 'Away_only', child: Text('Away only')),
-            DropdownMenuItem(value: 'Knockout', child: Text('Knockout')),
-          ],
-          onChanged: (v) => setState(() => _matchesSystem = v ?? _matchesSystem),
-          decoration: const InputDecoration(labelText: 'Matches System'),
-        ),
-      ),
-      Step(
-        title: const Text('Teams Pairing'),
-        isActive: _currentStep >= 2,
-        state: StepState.indexed,
-        content: DropdownButtonFormField<String>(
-          value: _teamsPairing,
-          items: const [
-            DropdownMenuItem(
-                value: 'ManualPairing', child: Text('Manual Pairing')),
-            DropdownMenuItem(
-                value: 'AutomatedPairing', child: Text('Automated Pairing')),
-          ],
-          onChanged: (v) => setState(() => _teamsPairing = v ?? _teamsPairing),
-          decoration: const InputDecoration(labelText: 'Teams Pairing'),
-        ),
-      ),
-      Step(
-        title: const Text('Number of Teams'),
-        isActive: _currentStep >= 3,
-        state: StepState.indexed,
-        content: TextField(
-          controller: _numTeamsController,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'NumberOfTeams'),
-        ),
-      ),
-    ];
-
-    // Only add Number of Groups step if NOT knockout
-    if (_matchesSystem != 'Knockout') {
-      steps.add(
-        Step(
-          title: const Text('Number of Groups'),
-          isActive: _currentStep >= 4,
-          state: StepState.indexed,
-          content: TextField(
-            controller: _numGroupsController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'NumberOfGroups'),
+  return [
+    Step(
+      title: const Text('League Info'),
+      isActive: _currentStep >= 0,
+      state: StepState.indexed,
+      content: Column(
+        children: [
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(labelText: 'League Name'),
           ),
-        ),
-      );
-    }
+          TextField(
+            controller: _seasonController,
+            decoration: const InputDecoration(labelText: 'Season'),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  initialValue: _logoUrl,
+                  decoration: const InputDecoration(labelText: 'Logo URL'),
+                  readOnly: true,
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: _pickAndUploadLogo,
+                child: const Text('Upload'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
 
-    // Match Days step
-    steps.add(
-      Step(
-        title: const Text('Match Days and Times'),
-        isActive: _currentStep >= 5,
-        state: StepState.indexed,
-        content: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Select weekdays and add times'),
-            Wrap(
-              spacing: 8,
-              children: List.generate(7, (i) {
-                final weekday = i + 1;
-                final names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                final selected = _selectedTimesByWeekday.containsKey(weekday);
-                return ChoiceChip(
-                  label: Text(names[i]),
-                  selected: selected,
-                  onSelected: (sel) {
-                    if (!sel) {
-                      _selectedTimesByWeekday.remove(weekday);
-                    } else {
-                      _selectedTimesByWeekday[weekday] =
-                          _selectedTimesByWeekday[weekday] ?? [];
-                    }
-                    setState(() {});
-                  },
-                );
-              }),
+    Step(
+      title: const Text('Match System'),
+      isActive: _currentStep >= 1,
+      state: StepState.indexed,
+      content: DropdownButtonFormField<String>(
+        value: _matchesSystem,
+        items: const [
+          DropdownMenuItem(value: 'Home_and_away', child: Text('Home and away')),
+          DropdownMenuItem(value: 'Away_only', child: Text('Away only')),
+          DropdownMenuItem(value: 'Knockout', child: Text('Knockout')),
+        ],
+        onChanged: (v) {
+          setState(() {
+            _matchesSystem = v ?? _matchesSystem;
+          });
+        },
+        decoration: const InputDecoration(labelText: 'Matches System'),
+      ),
+    ),
+
+    Step(
+      title: const Text('Teams Pairing'),
+      isActive: _currentStep >= 2,
+      state: StepState.indexed,
+      content: DropdownButtonFormField<String>(
+        value: _teamsPairing,
+        items: const [
+          DropdownMenuItem(
+              value: 'ManualPairing', child: Text('Manual Pairing')),
+          DropdownMenuItem(
+              value: 'AutomatedPairing', child: Text('Automated Pairing')),
+        ],
+        onChanged: (v) => setState(() => _teamsPairing = v ?? _teamsPairing),
+        decoration: const InputDecoration(labelText: 'Teams Pairing'),
+      ),
+    ),
+
+    Step(
+      title: const Text('Number of Teams'),
+      isActive: _currentStep >= 3,
+      state: StepState.indexed,
+      content: TextField(
+        controller: _numTeamsController,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(labelText: 'NumberOfTeams'),
+      ),
+    ),
+
+    /// ✅ ALWAYS KEEP THIS STEP (BUT HIDE CONTENT IF KNOCKOUT)
+    Step(
+      title: const Text('Number of Groups'),
+      isActive: _currentStep >= 4,
+      state: StepState.indexed,
+      content: _matchesSystem == 'Knockout'
+          ? const Text(
+              'Knockout competitions do not use groups.',
+              style: TextStyle(color: Colors.grey),
+            )
+          : TextField(
+              controller: _numGroupsController,
+              keyboardType: TextInputType.number,
+              decoration:
+                  const InputDecoration(labelText: 'NumberOfGroups'),
             ),
-            const SizedBox(height: 8),
-            Column(
-                children: _selectedTimesByWeekday.entries.map((e) {
+    ),
+
+    Step(
+      title: const Text('Match Days and Times'),
+      isActive: _currentStep >= 5,
+      state: StepState.indexed,
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Select weekdays and add times'),
+          Wrap(
+            spacing: 8,
+            children: List.generate(7, (i) {
+              final weekday = i + 1;
+              final names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+              final selected =
+                  _selectedTimesByWeekday.containsKey(weekday);
+              return ChoiceChip(
+                label: Text(names[i]),
+                selected: selected,
+                onSelected: (sel) {
+                  if (!sel) {
+                    _selectedTimesByWeekday.remove(weekday);
+                  } else {
+                    _selectedTimesByWeekday[weekday] =
+                        _selectedTimesByWeekday[weekday] ?? [];
+                  }
+                  setState(() {});
+                },
+              );
+            }),
+          ),
+          const SizedBox(height: 8),
+          Column(
+            children: _selectedTimesByWeekday.entries.map((e) {
               final weekday = e.key;
               final times = e.value;
               final names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
               return ListTile(
                 title: Text(names[weekday - 1]),
-                subtitle: Text(times.map((t) => '${t.format(context)}').join(', ')),
+                subtitle: Text(
+                  times.map((t) => t.format(context)).join(', '),
+                ),
                 trailing: IconButton(
                   icon: const Icon(Icons.add),
                   onPressed: () => _pickMatchDayTime(weekday),
                 ),
               );
-            }).toList()),
-          ],
-        ),
+            }).toList(),
+          ),
+        ],
       ),
-    );
+    ),
+  ];
+}
 
-    return steps;
-  }
 
   Future<void> _pickMatchDayTime(int weekday) async {
     final t = await showTimePicker(

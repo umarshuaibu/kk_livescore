@@ -48,25 +48,33 @@ class MyApp extends StatelessWidget {
 
   static final FirebaseAuth _auth = FirebaseAuth.instance;
 
+Stream<User?> get authStream async* {
+  yield _auth.currentUser;
+  yield* _auth.authStateChanges();
+}
+
+
   @override
   Widget build(BuildContext context) {
     final GoRouter router = GoRouter(
       debugLogDiagnostics: true,
 
-      refreshListenable: GoRouterRefreshStream(
-        _auth.authStateChanges(),
-      ),
+refreshListenable: GoRouterRefreshStream(MyApp._auth),
+
+
+
+
 
       // 🔐 AUTH REDIRECT
       redirect: (context, state) {
         final user = _auth.currentUser;
-        final isLoggingIn = state.matchedLocation == '/admin_login';
+final location = state.uri.toString();
+final isLoggingIn = location == '/admin_login';
 
-        const publicRoutes = ['/public_test'];
+if (location.startsWith('/public_test')) {
+  return null;
+}
 
-        if (publicRoutes.contains(state.matchedLocation)) {
-          return null;
-        }
 
         if (user == null) {
           return isLoggingIn ? null : '/admin_login';
@@ -209,11 +217,24 @@ GoRoute(
 
 /// 🔁 Refresh GoRouter on auth changes
 class GoRouterRefreshStream extends ChangeNotifier {
-  GoRouterRefreshStream(Stream<dynamic> stream) {
-    _subscription = stream.listen((_) => notifyListeners());
-  }
+  late final StreamSubscription _subscription;
 
-  late final StreamSubscription<dynamic> _subscription;
+  GoRouterRefreshStream(FirebaseAuth auth) {
+    // Create a broadcast stream that emits current user first
+    final controller = StreamController<User?>.broadcast();
+
+    // Immediately emit current user
+    controller.add(auth.currentUser);
+
+    // Pipe authStateChanges into it
+    auth.authStateChanges().listen((user) => controller.add(user));
+
+    // Subscribe to controller
+    _subscription = controller.stream.listen(
+      (_) => notifyListeners(),
+      onError: (_) {},
+    );
+  }
 
   @override
   void dispose() {

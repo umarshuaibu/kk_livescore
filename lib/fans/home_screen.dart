@@ -5,11 +5,11 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:kklivescoreadmin/constants/colors.dart';
 import 'package:kklivescoreadmin/constants/size.dart';
 import 'package:kklivescoreadmin/constants/text_styles.dart';
-import 'package:kklivescoreadmin/fans/reusables/bracket_view_tab.dart';
 import 'package:kklivescoreadmin/fans/reusables/coaches_tab.dart';
 import 'package:kklivescoreadmin/fans/reusables/matches_tab.dart';
 import 'package:kklivescoreadmin/fans/reusables/news_tab.dart';
 import 'package:kklivescoreadmin/fans/reusables/teams_tab.dart';
+import 'package:kklivescoreadmin/league_manager/knockout_system/knockout_system_ui.dart';
 import 'package:kklivescoreadmin/league_manager/standings/standings_tab.dart';
 
 class PublicHomePage extends StatefulWidget {
@@ -22,29 +22,30 @@ class PublicHomePage extends StatefulWidget {
 class _PublicHomePageState extends State<PublicHomePage>
     with SingleTickerProviderStateMixin {
   String? selectedLeagueId;
-  String? selectedLeagueMatchSystem; // Tracks "Knockout" or other
+  String? selectedLeagueMatchSystem;
+
   late TabController _tabController;
+
   late BannerAd _bannerAd;
   bool _isBannerAdLoaded = false;
 
   @override
   void initState() {
     super.initState();
+
     _tabController = TabController(length: 5, vsync: this);
 
     _bannerAd = BannerAd(
-      adUnitId: 'ca-app-pub-7769762821516033/3319422467', // Banner ID
+      adUnitId: 'ca-app-pub-7769762821516033/3319422467',
       size: AdSize.banner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (_) {
-          setState(() {
-            _isBannerAdLoaded = true;
-          });
+          setState(() => _isBannerAdLoaded = true);
         },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
-          debugPrint('Banner failed to load: $error');
+          debugPrint('Banner failed: $error');
         },
       ),
     );
@@ -52,12 +53,8 @@ class _PublicHomePageState extends State<PublicHomePage>
     _bannerAd.load();
   }
 
-  // ------------------ EXIT APP ------------------ //
-  void _exitApp() {
-    SystemNavigator.pop();
-  }
+  void _exitApp() => SystemNavigator.pop();
 
-  // ------------------ FEEDBACK PAGE ------------------ //
   void _openFeedback() {
     Navigator.push(
       context,
@@ -65,24 +62,20 @@ class _PublicHomePageState extends State<PublicHomePage>
     );
   }
 
-  // ------------------ FETCH LEAGUES (plural then singular fallback) ------------------ //
   Future<List<QueryDocumentSnapshot>> _fetchLeaguesDocs() async {
-    try {
-      final pluralSnap =
-          await FirebaseFirestore.instance.collection('leagues').get();
-      if (pluralSnap.docs.isNotEmpty) return pluralSnap.docs;
+    final plural =
+        await FirebaseFirestore.instance.collection('leagues').get();
+    if (plural.docs.isNotEmpty) return plural.docs;
 
-      final singularSnap =
-          await FirebaseFirestore.instance.collection('league').get();
-      return singularSnap.docs;
-    } catch (e) {
-      debugPrint('[PublicHomePage] _fetchLeaguesDocs failed: $e');
-      rethrow;
-    }
+    final singular =
+        await FirebaseFirestore.instance.collection('league').get();
+    return singular.docs;
   }
 
   @override
   Widget build(BuildContext context) {
+    final isKnockout = selectedLeagueMatchSystem == 'Knockout';
+
     return Scaffold(
       backgroundColor: kPrimaryColor,
       appBar: AppBar(
@@ -95,93 +88,36 @@ class _PublicHomePageState extends State<PublicHomePage>
           FutureBuilder<List<QueryDocumentSnapshot>>(
             future: _fetchLeaguesDocs(),
             builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return Padding(
-                  padding: EdgeInsets.symmetric(horizontal: eqW(8)),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Unable to load leagues',
-                        style: kText12White,
-                      ),
-                      SizedBox(width: eqW(8)),
-                      IconButton(
-                        onPressed: () => setState(() {}),
-                        icon: Icon(Icons.refresh, color: kPrimaryLight),
-                        tooltip: 'Retry',
-                      ),
-                    ],
-                  ),
-                );
-              }
-
               if (!snapshot.hasData) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(8),
-                    child: SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: CircularProgressIndicator(
-                        color: kPrimaryLight,
-                        strokeWidth: 2,
-                      ),
-                    ),
+                return const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: CircularProgressIndicator(
+                    color: kPrimaryLight,
+                    strokeWidth: 2,
                   ),
                 );
               }
 
               final leagues = snapshot.data!;
 
-              // Clear selection if league no longer exists
-              final bool selectedStillPresent = selectedLeagueId != null &&
-                  leagues.any((d) => d.id == selectedLeagueId);
-              if (!selectedStillPresent && selectedLeagueId != null) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) {
-                    setState(() {
-                      selectedLeagueId = null;
-                      selectedLeagueMatchSystem = null;
-                    });
-                  }
-                });
-              }
-
-              if (leagues.isEmpty) {
-                return Padding(
-                  padding: EdgeInsets.symmetric(horizontal: eqW(12)),
-                  child:
-                      Center(child: Text('No leagues available', style: kText12White)),
-                );
-              }
-
               return DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   dropdownColor: kWhiteColor,
-                  value: selectedStillPresent ? selectedLeagueId : null,
-                  hint: const Text(
-                    "Switch League",
-                    style: TextStyle(
-                      color: kGrey1,
-                      fontSize: 12,
-                    ),
-                  ),
+                  value: selectedLeagueId,
+                  hint: const Text("Switch League"),
                   items: leagues.map((doc) {
                     final data = doc.data() as Map<String, dynamic>? ?? {};
-                    final displayName =
-                        (data['name']?.toString().trim().isNotEmpty == true)
-                            ? data['name'].toString()
-                            : 'Unnamed League';
+                    final name = data['name'] ?? 'Unnamed League';
+
                     return DropdownMenuItem(
                       value: doc.id,
-                      child: Text(
-                        displayName,
-                        style: TextStyle(color: kPrimaryColor),
-                      ),
+                      child: Text(name,
+                          style: TextStyle(color: kPrimaryColor)),
                     );
                   }).toList(),
                   onChanged: (val) {
                     if (val == null) return;
+
                     final leagueData = leagues
                         .firstWhere((d) => d.id == val)
                         .data() as Map<String, dynamic>?;
@@ -189,7 +125,8 @@ class _PublicHomePageState extends State<PublicHomePage>
                     setState(() {
                       selectedLeagueId = val;
                       selectedLeagueMatchSystem =
-                          leagueData?['MatchesSystem']?.toString() ?? 'Home_and_away';
+                          leagueData?['MatchesSystem'] ?? 'Home_and_away';
+
                       _tabController.animateTo(0);
                     });
                   },
@@ -203,11 +140,10 @@ class _PublicHomePageState extends State<PublicHomePage>
 
       body: Column(
         children: [
-          // Tabs
-          Material(
-            color: kSecondaryColor,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+          /// ❌ HIDE OUTER TABS IF KNOCKOUT
+          if (!isKnockout)
+            Material(
+              color: kSecondaryColor,
               child: TabBar(
                 controller: _tabController,
                 isScrollable: true,
@@ -223,47 +159,42 @@ class _PublicHomePageState extends State<PublicHomePage>
                 ],
               ),
             ),
-          ),
 
-          // Main content
           Expanded(
             child: selectedLeagueId == null
                 ? Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(eqW(12)),
-                      child: Text(
-                        "Please select a league above",
-                        style: kText12White,
-                        textAlign: TextAlign.center,
-                      ),
+                    child: Text(
+                      "Please select a league",
+                      style: kText12White,
                     ),
                   )
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      MatchesTab(
+
+                /// 🔴 FULL SWITCH TO KNOCKOUT UI
+                : isKnockout
+                    ? KnockoutSystemUI(
                         leagueId: selectedLeagueId!,
-                        matchesStream: FirebaseFirestore.instance
-                            .collection('leagues')
-                            .doc(selectedLeagueId)
-                            .collection('matches')
-                            .snapshots(),
+                      )
+
+                    /// 🟢 NORMAL LEAGUE UI
+                    : TabBarView(
+                        controller: _tabController,
+                        children: [
+                          MatchesTab(
+                            leagueId: selectedLeagueId!,
+                            matchesStream: FirebaseFirestore.instance
+                                .collection('leagues')
+                                .doc(selectedLeagueId)
+                                .collection('matches')
+                                .snapshots(),
+                          ),
+                          TeamsTab(leagueId: selectedLeagueId!),
+                          CoachesTab(leagueId: selectedLeagueId!),
+                          StandingsTab(leagueId: selectedLeagueId!),
+                          NewsTab(leagueId: selectedLeagueId!),
+                        ],
                       ),
-                      TeamsTab(leagueId: selectedLeagueId!),
-                      CoachesTab(leagueId: selectedLeagueId!),
-
-                      /// ------------------ STANDINGS OR BRACKET ------------------ ///
-                      if (selectedLeagueMatchSystem == 'Knockout')
-                        BracketViewTab(leagueId: selectedLeagueId!)
-                      else
-                        StandingsTab(leagueId: selectedLeagueId!),
-
-                      NewsTab(leagueId: selectedLeagueId!),
-                    ],
-                  ),
           ),
 
-          // 🔥 BANNER AD
           if (_isBannerAdLoaded)
             SizedBox(
               height: _bannerAd.size.height.toDouble(),
@@ -273,7 +204,6 @@ class _PublicHomePageState extends State<PublicHomePage>
         ],
       ),
 
-      // ============= Bottom Navigation ============= //
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: kScaffoldColor,
         selectedItemColor: kPrimaryLight,
@@ -299,9 +229,7 @@ class _PublicHomePageState extends State<PublicHomePage>
   }
 }
 
-// ----------------------------------------------
-// Dummy Feedback Page
-// ----------------------------------------------
+/// Dummy Feedback Page
 class FeedbackPlaceholder extends StatelessWidget {
   const FeedbackPlaceholder({super.key});
 
@@ -314,10 +242,7 @@ class FeedbackPlaceholder extends StatelessWidget {
         foregroundColor: kWhiteColor,
       ),
       body: Center(
-        child: Text(
-          "coming soon",
-          style: kText14White,
-        ),
+        child: Text("coming soon", style: kText14White),
       ),
     );
   }

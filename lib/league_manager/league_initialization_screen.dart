@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:kklivescoreadmin/league_manager/firestore_service.dart';
+import 'package:kklivescoreadmin/league_manager/knockout_system/knockout_system_logics.dart';
 import 'package:kklivescoreadmin/league_manager/manual_pairing.dart';
 import 'package:kklivescoreadmin/league_manager/match_scheduler.dart';
 import 'package:kklivescoreadmin/league_manager/match_system.dart';
@@ -314,99 +315,165 @@ class _LeagueInitializationScreenState
     }
   }
 
-  /// ---------------- MANUAL INITIALIZATION ----------------
-  Future<void> _initializeManual() async {
-    if (!_validateAssignments()) {
-      await _showDialog(
-          title: 'Invalid',
-          message: 'Teams per group must equal NumberOfTeams/NumberOfGroups');
-      return;
-    }
-    if (_startingDate == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Pick a starting date')));
-      return;
-    }
-    if (_manualPairs.isEmpty &&
-        (_leagueData?['MatchesSystem'] as String?) != 'Knockout') {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('No pairs added')));
-      return;
-    }
+ /// ---------------- MANUAL INITIALIZATION ----------------
+Future<void> _initializeManual() async {
+  final matchesSystem =
+      (_leagueData?['MatchesSystem'] as String?) ?? 'Home_and_away';
 
-    final matchDays = List<String>.from(_leagueData?['MatchDays'] ?? []);
-    List<Map<String, dynamic>> pairs;
+  final bool isKnockout = matchesSystem == 'Knockout';
 
-    if ((_leagueData?['MatchesSystem'] as String?) == 'Knockout') {
-      pairs = generateManualMatches(pairs: _manualPairs, isKnockout: true);
-      if (pairs.isEmpty) {
-        final teams = _leagueTeams.map((t) => t['teamId'] as String).toList();
-        pairs = [];
-        for (int i = 0; i < teams.length; i += 2) {
-          if (i + 1 < teams.length) {
-            pairs.add({'teamAId': teams[i], 'teamBId': teams[i + 1]});
-          } else {
-            pairs.add({'teamAId': teams[i], 'teamBId': 'BYE'});
-          }
-        }
-      }
-      pairs = generateKnockoutRounds(pairs);
-    } else {
-      pairs = generateManualMatches(pairs: _manualPairs);
-    }
+  /// ✅ ONLY validate groups for NON-knockout
+  if (!isKnockout && !_validateAssignments()) {
+    await _showDialog(
+      title: 'Invalid',
+      message: 'Teams per group must equal NumberOfTeams/NumberOfGroups',
+    );
+    return;
+  }
 
-    final scheduleDates =
-        scheduleMatches(startDate: _startingDate!, matchDays: matchDays, totalMatches: pairs.length);
+  /// ✅ Date required for ALL
+  if (_startingDate == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Pick a starting date')),
+    );
+    return;
+  }
 
-    for (int i = 0; i < pairs.length; i++) {
-      final match = pairs[i];
-      final id = FirebaseFirestore.instance.collection('x').doc().id;
-      final matchDoc = {
-        'id': id,
-        'teamAId': match['teamAId'],
-        'teamBId': match['teamBId'],
-        'status': 'scheduled',
-        'group': match['group'] ?? '',
-        'leagueId': widget.leagueId,
-        'date': scheduleDates[i],
-      };
-      await _firestoreService.createMatch(
-          leagueId: widget.leagueId, matchId: id, matchData: matchDoc);
-    }
+  final matchDays = List<String>.from(_leagueData?['MatchDays'] ?? []);
 
-    final teamDocs = await _firestoreService.fetchLeagueTeams(widget.leagueId);
-    for (final d in teamDocs) {
-      final data = d.data() as Map<String, dynamic>;
-      final teamId = data['teamId'] as String;
-      final group = data['group'] as String? ?? '';
-      final standing = {
-        'teamId': teamId,
-        'leagueId': widget.leagueId,
-        'group': group,
-        'played': 0,
-        'won': 0,
-        'drawn': 0,
-        'lost': 0,
-        'goalsFor': 0,
-        'goalsAgainst': 0,
-        'goalDifference': 0,
-        'points': 0,
-        'lastUpdated': DateTime.now(),
-      };
-      await _firestoreService.createStanding(
-          leagueId: widget.leagueId, teamId: teamId, standingData: standing);
-    }
+  /// =====================================================
+  /// 🏆 KNOCKOUT INITIALIZATION (DELEGATED)
+  /// =====================================================
+  if (isKnockout) {
+    final manager = KnockoutLeagueManager(
+      leagueId: widget.leagueId,
+    );
 
+    await manager.initializeKnockoutLeague(
+      manualPairs: _manualPairs,
+      availableTeams: _availableTeamDocs,
+      startDate: _startingDate!,
+    );
+
+    /// 🚀 Activate league
     await FirebaseFirestore.instance
         .collection('leagues')
         .doc(widget.leagueId)
         .update({'status': 'active'});
 
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('League initialized (manual)')));
+      const SnackBar(
+        content: Text('Knockout league initialized successfully'),
+      ),
+    );
+
     await _loadAll();
+    return; // ✅ VERY IMPORTANT: stop here
   }
+
+  /// =====================================================
+  /// 🔵 NON-KNOCKOUT LOGIC (UNCHANGED)
+  /// =====================================================
+  if (_manualPairs.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No pairs added')),
+    );
+    return;
+  }
+
+  List<Map<String, dynamic>> pairs = generateManualMatches(
+    pairs: _manualPairs,
+  );
+
+  /// =========================
+  /// 📅 SCHEDULING
+  /// =========================
+  final scheduleDates = scheduleMatches(
+    startDate: _startingDate!,
+    matchDays: matchDays,
+    totalMatches: pairs.length,
+  );
+
+  /// =========================
+  /// 💾 SAVE MATCHES
+  /// =========================
+  for (int i = 0; i < pairs.length; i++) {
+    final match = pairs[i];
+    final id = FirebaseFirestore.instance.collection('x').doc().id;
+
+    final matchDoc = {
+      'id': id,
+      'teamAId': match['teamAId'],
+      'teamBId': match['teamBId'],
+      'status': 'scheduled',
+      'group': match['group'] ?? '',
+      'round': match['round'] ?? 1,
+      'leagueId': widget.leagueId,
+      'date': scheduleDates[i],
+    };
+
+    await _firestoreService.createMatch(
+      leagueId: widget.leagueId,
+      matchId: id,
+      matchData: matchDoc,
+    );
+  }
+
+  /// =========================
+  /// 📊 STANDINGS (NON-KNOCKOUT ONLY)
+  /// =========================
+  final teamDocs =
+      await _firestoreService.fetchLeagueTeams(widget.leagueId);
+
+  for (final d in teamDocs) {
+    final data = d.data() as Map<String, dynamic>;
+    final teamId = data['teamId'] as String;
+    final group = data['group'] as String? ?? '';
+
+    final standing = {
+      'teamId': teamId,
+      'leagueId': widget.leagueId,
+      'group': group,
+      'played': 0,
+      'won': 0,
+      'drawn': 0,
+      'lost': 0,
+      'goalsFor': 0,
+      'goalsAgainst': 0,
+      'goalDifference': 0,
+      'points': 0,
+      'lastUpdated': DateTime.now(),
+    };
+
+    await _firestoreService.createStanding(
+      leagueId: widget.leagueId,
+      teamId: teamId,
+      standingData: standing,
+    );
+  }
+
+  /// =========================
+  /// 🚀 ACTIVATE LEAGUE
+  /// =========================
+  await FirebaseFirestore.instance
+      .collection('leagues')
+      .doc(widget.leagueId)
+      .update({'status': 'active'});
+
+  if (!mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('League initialized (manual)'),
+    ),
+  );
+
+  await _loadAll();
+}
+
+
 
   /// ---------------- HELPERS ----------------
   Future<void> _showDialog(
