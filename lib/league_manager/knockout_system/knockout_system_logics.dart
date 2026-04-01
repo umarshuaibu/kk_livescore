@@ -13,163 +13,176 @@ class KnockoutLeagueManager {
   /// =========================================================
   /// 🏆 MAIN ENTRY: Initialize Knockout League
   /// =========================================================
-  Future<void> initializeKnockoutLeague({
-    required List<Map<String, dynamic>> manualPairs,
-    required List<QueryDocumentSnapshot> availableTeams,
-    required DateTime startDate,
-  }) async {
-    List<Map<String, dynamic>> pairs = [];
-
-    /// =========================
-    /// 1️⃣ PAIR TEAMS
-    /// =========================
-    if (manualPairs.isNotEmpty) {
-      pairs = manualPairs
-          .map((p) => {
-                'teamAId': p['teams'][0],
-                'teamBId': p['teams'].length > 1 ? p['teams'][1] : 'BYE',
-              })
-          .toList();
-    } else {
-      final teamIds = availableTeams.map((d) => d.id).toList();
-      for (int i = 0; i < teamIds.length; i += 2) {
-        if (i + 1 < teamIds.length) {
-          pairs.add({'teamAId': teamIds[i], 'teamBId': teamIds[i + 1]});
-        } else {
-          pairs.add({'teamAId': teamIds[i], 'teamBId': 'BYE'});
-        }
-      }
-    }
-
-    /// =========================
-    /// 2️⃣ SAVE ONLY USED TEAMS
-    /// =========================
-    final usedTeamIds = <String>{};
-    for (var p in pairs) {
-      if (p['teamAId'] != 'BYE') usedTeamIds.add(p['teamAId']);
-      if (p['teamBId'] != 'BYE') usedTeamIds.add(p['teamBId']);
-    }
-
-    final batch = _firestore.batch();
-    for (final teamId in usedTeamIds) {
-      final globalTeam = await _firestore.collection('teams').doc(teamId).get();
-      if (!globalTeam.exists) continue;
-
-      final leagueTeamRef =
-          _firestore.collection('leagues').doc(leagueId).collection('teams').doc(teamId);
-
-      batch.set(leagueTeamRef, {
-        ...globalTeam.data()!,
-        'teamId': teamId,
-      });
-    }
-    await batch.commit();
-
-    /// =========================
-    /// 3️⃣ GET MATCH DAYS
-    /// =========================
-    final leagueDoc = await _firestore.collection('leagues').doc(leagueId).get();
-    final leagueData = leagueDoc.data() ?? {};
-    final matchDays = List<String>.from(leagueData['MatchDays'] ?? []);
-    if (matchDays.isEmpty) throw Exception('No match days configured for this league.');
-
-    /// =========================
-    /// 4️⃣ GENERATE ROUNDS + MATCHES
-    /// =========================
-    final generated = await _generateRoundsFromPairs(pairs);
-    final allMatches = generated['matches'] as List<Map<String, dynamic>>;
-    final rounds = generated['rounds'] as List<Map<String, dynamic>>;
-
-    /// =========================
-    /// 5️⃣ SCHEDULE MATCHES
-    /// =========================
-    final scheduledDates = scheduleMatches(
-      startDate: startDate,
-      matchDays: matchDays,
-      totalMatches: allMatches.length,
-    );
-    if (scheduledDates.length < allMatches.length) {
-      throw Exception('Not enough match slots generated.');
-    }
-
-    /// =========================
-    /// 6️⃣ SAVE MATCHES
-    /// =========================
-    final matchBatch = _firestore.batch();
-    for (int i = 0; i < allMatches.length; i++) {
-      final m = allMatches[i];
-      final matchRef =
-          _firestore.collection('leagues').doc(leagueId).collection('matches').doc(m['matchId']);
-
-      matchBatch.set(matchRef, {
-        ...m,
-        'leagueId': leagueId,
-        'date': scheduledDates[i],
-      });
-    }
-    await matchBatch.commit();
-
-    /// =========================
-    /// 7️⃣ SAVE ROUNDS
-    /// =========================
-    final roundsRef = _firestore.collection('leagues').doc(leagueId).collection('rounds');
-    for (final r in rounds) {
-      await roundsRef.doc(r['name']).set(r);
-    }
+ /// 🏆 MAIN ENTRY: Initialize Knockout League (manual-only)
+Future<void> initializeKnockoutLeague({
+  required List<Map<String, dynamic>> manualPairs,
+  required List<QueryDocumentSnapshot> availableTeams,
+  required DateTime startDate,
+}) async {
+  // =========================
+  // 1️⃣ VALIDATE MANUAL PAIRS
+  // =========================
+  if (manualPairs.isEmpty) {
+    throw Exception('No manual pairs provided. Cannot initialize knockout league.');
   }
+
+  // =========================
+  // 2️⃣ FORMAT PAIRS
+  // =========================
+  final pairs = manualPairs.map((p) {
+    // Always take first two teams in the 'teams' list; if second missing, set BYE
+    return {
+      'teamAId': p['teams'][0],
+      'teamBId': p['teams'].length > 1 ? p['teams'][1] : 'BYE',
+    };
+  }).toList();
+
+  // =========================
+  // 3️⃣ SAVE ONLY USED TEAMS TO LEAGUE
+  // =========================
+  final usedTeamIds = <String>{};
+  for (var p in pairs) {
+    if (p['teamAId'] != 'BYE') usedTeamIds.add(p['teamAId']);
+    if (p['teamBId'] != 'BYE') usedTeamIds.add(p['teamBId']);
+  }
+
+  final batch = _firestore.batch();
+  for (final teamId in usedTeamIds) {
+    final globalTeam = await _firestore.collection('teams').doc(teamId).get();
+    if (!globalTeam.exists) continue;
+
+    final leagueTeamRef =
+        _firestore.collection('leagues').doc(leagueId).collection('teams').doc(teamId);
+
+    batch.set(leagueTeamRef, {
+      ...globalTeam.data()!,
+      'teamId': teamId,
+    });
+  }
+  await batch.commit();
+
+  // =========================
+  // 4️⃣ GET MATCH DAYS
+  // =========================
+  final leagueDoc = await _firestore.collection('leagues').doc(leagueId).get();
+  final leagueData = leagueDoc.data() ?? {};
+  final matchDays = List<String>.from(leagueData['MatchDays'] ?? []);
+  if (matchDays.isEmpty) throw Exception('No match days configured for this league.');
+
+  // =========================
+  // 5️⃣ GENERATE ROUNDS + MATCHES
+  // =========================
+  final generated = await _generateRoundsFromPairs(pairs);
+  final allMatches = generated['matches'] as List<Map<String, dynamic>>;
+  final rounds = generated['rounds'] as List<Map<String, dynamic>>;
+
+  // =========================
+  // 6️⃣ SCHEDULE MATCHES
+  // =========================
+  final scheduledDates = scheduleMatches(
+    startDate: startDate,
+    matchDays: matchDays,
+    totalMatches: allMatches.length,
+  );
+  if (scheduledDates.length < allMatches.length) {
+    throw Exception('Not enough match slots generated.');
+  }
+
+  // =========================
+  // 7️⃣ SAVE MATCHES
+  // =========================
+  final matchBatch = _firestore.batch();
+  for (int i = 0; i < allMatches.length; i++) {
+    final m = allMatches[i];
+    final matchRef =
+        _firestore.collection('leagues').doc(leagueId).collection('matches').doc(m['matchId']);
+
+    matchBatch.set(matchRef, {
+      ...m,
+      'leagueId': leagueId,
+      'date': scheduledDates[i],
+    });
+  }
+  await matchBatch.commit();
+
+  // =========================
+  // 8️⃣ SAVE ROUNDS
+  // =========================
+  final roundsRef = _firestore.collection('leagues').doc(leagueId).collection('rounds');
+  for (final r in rounds) {
+    await roundsRef.doc(r['name']).set(r);
+  }
+}
 
   /// =========================================================
   /// 🔁 GENERATE ROUNDS + RETURN MATCH LIST
   /// =========================================================
-  Future<Map<String, dynamic>> _generateRoundsFromPairs(
-      List<Map<String, dynamic>> initialPairs) async {
-    List<Map<String, dynamic>> teams = [];
+Future<Map<String, dynamic>> _generateRoundsFromPairs(
+    List<Map<String, dynamic>> initialPairs) async {
 
-    for (var p in initialPairs) {
-      teams.add({'teamId': p['teamAId']});
-      teams.add({'teamId': p['teamBId']});
+  List<Map<String, dynamic>> allMatches = [];
+  List<Map<String, dynamic>> rounds = [];
+
+  List<Map<String, dynamic>> currentPairs = List.from(initialPairs);
+
+  int round = 1;
+
+  while (currentPairs.isNotEmpty) {
+    final roundName = _getRoundName(round, _calculateTotalRounds(initialPairs.length));
+
+    final matches = <Map<String, dynamic>>[];
+
+    for (var p in currentPairs) {
+      final matchId = _firestore.collection('leagues').doc().id;
+
+      matches.add({
+        'matchId': matchId,
+        'teamAId': p['teamAId'],
+        'teamBId': p['teamBId'],
+        'status': p['teamBId'] == 'BYE' ? 'completed' : 'scheduled',
+        'winnerTeamId': p['teamBId'] == 'BYE' ? p['teamAId'] : null,
+      });
+
+      allMatches.add({
+        'matchId': matchId,
+        'teamAId': p['teamAId'],
+        'teamBId': p['teamBId'],
+        'status': p['teamBId'] == 'BYE' ? 'completed' : 'scheduled',
+        'winnerTeamId': p['teamBId'] == 'BYE' ? p['teamAId'] : null,
+        'round': round,
+        'roundName': roundName,
+      });
     }
 
-    // Remove duplicates
-    final seen = <String>{};
-    teams = teams.where((t) {
-      if (seen.contains(t['teamId'])) return false;
-      seen.add(t['teamId']);
-      return true;
-    }).toList();
+    rounds.add({
+      'name': roundName,
+      'roundNumber': round,
+      'matches': matches,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
 
-    teams.shuffle(Random());
-    int numTeams = teams.length;
-    int numRounds = (log(numTeams) / log(2)).ceil();
-    int nextPowerOf2 = pow(2, numRounds).toInt();
+    /// ✅ Prepare NEXT ROUND (empty slots, NO shuffle)
+    final nextRoundPairs = <Map<String, dynamic>>[];
 
-    while (teams.length < nextPowerOf2) teams.add({'teamId': 'BYE'});
-
-    List<Map<String, dynamic>> allMatches = [];
-    List<Map<String, dynamic>> rounds = [];
-
-    for (int r = 1; r <= numRounds; r++) {
-      final roundName = _getRoundName(r, numRounds);
-      final matches = _generateMatchesForRound(teams, r);
-
-      final roundData = {
-        'name': roundName,
-        'roundNumber': r,
-        'matches': matches.map((m) => _matchToMap(m)).toList(),
-        'createdAt': FieldValue.serverTimestamp(),
-      };
-      rounds.add(roundData);
-
-      for (var m in matches) {
-        allMatches.add({..._matchToMap(m), 'round': r, 'roundName': roundName});
-      }
-
-      // Prepare placeholder teams for next round
-      teams = List.generate(matches.length, (index) => {'teamId': null});
+    for (int i = 0; i < matches.length; i += 2) {
+      nextRoundPairs.add({
+        'teamAId': null,
+        'teamBId': null,
+      });
     }
 
-    return {'matches': allMatches, 'rounds': rounds};
+    currentPairs = nextRoundPairs;
+    round++;
+
+    /// Stop when only one match remains (final created)
+    if (matches.length == 1) break;
   }
+
+  return {
+    'matches': allMatches,
+    'rounds': rounds,
+  };
+}
 
   /// =========================================================
   /// MATCH GENERATOR
@@ -384,4 +397,15 @@ class _Match {
     required this.status,
     this.winnerTeamId,
   });
+}
+int _calculateTotalRounds(int totalPairs) {
+  int teams = totalPairs * 2;
+  int rounds = 0;
+
+  while (teams > 1) {
+    teams = (teams / 2).ceil();
+    rounds++;
+  }
+
+  return rounds;
 }

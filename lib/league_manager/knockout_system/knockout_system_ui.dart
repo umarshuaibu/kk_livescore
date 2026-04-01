@@ -360,48 +360,66 @@ class _KnockoutSystemUIState extends State<KnockoutSystemUI>
   // =========================================================
   // COACHES TAB
   // =========================================================
-  Widget _coachesTab() {
-    return ListView(
-      padding: const EdgeInsets.all(10),
-      children: _teams.entries.map((entry) {
-        final coachId = entry.value['coachId'];
+Widget _coachesTab() {
+  return ListView(
+    padding: const EdgeInsets.all(10),
+    children: _teams.entries.map((entry) {
+      final coachId = entry.value['coachId'];
 
-        return FutureBuilder<DocumentSnapshot>(
-          future: _firestore.collection('coaches').doc(coachId).get(),
-          builder: (_, snap) {
-            if (!snap.hasData) {
-              return const ListTile(
-                title: Text('Loading...',
-                    style: TextStyle(color: Colors.white)),
-              );
-            }
-
-            final coach = snap.data!.data() as Map<String, dynamic>?;
-
-            return Card(
-              color: kSecondaryColor,
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundImage:
-                      NetworkImage(coach?['photoUrl'] ?? ''),
-                ),
-                title: Text(
-                  coach?['name'] ?? 'Unknown Coach',
-                  style: const TextStyle(
-                      color: Colors.white, fontSize: 10),
-                ),
-                subtitle: Text(
-                  entry.value['name']!,
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 8),
-                ),
-              ),
-            );
-          },
+      // ✅ Handle missing or empty coachId
+      if (coachId == null || coachId.isEmpty) {
+        return Card(
+          color: kSecondaryColor,
+          child: ListTile(
+            leading: const CircleAvatar(
+              child: Icon(Icons.person, size: 12),
+            ),
+            title: const Text(
+              'No Coach Assigned',
+              style: TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            subtitle: Text(
+              entry.value['name']!,
+              style: const TextStyle(color: Colors.white70, fontSize: 8),
+            ),
+          ),
         );
-      }).toList(),
-    );
-  }
+      }
+
+      return FutureBuilder<DocumentSnapshot>(
+        future: _firestore.collection('coaches').doc(coachId).get(),
+        builder: (_, snap) {
+          if (!snap.hasData) {
+            return const ListTile(
+              title: Text('Loading...',
+                  style: TextStyle(color: Colors.white)),
+            );
+          }
+
+          final coach = snap.data!.data() as Map<String, dynamic>?;
+
+          return Card(
+            color: kSecondaryColor,
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundImage: NetworkImage(coach?['photoUrl'] ?? ''),
+              ),
+              title: Text(
+                coach?['name'] ?? 'Unknown Coach',
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+              ),
+              subtitle: Text(
+                entry.value['name']!,
+                style: const TextStyle(color: Colors.white70, fontSize: 8),
+              ),
+            ),
+          );
+        },
+      );
+    }).toList(),
+  );
+}
+
 
   // =========================================================
   // ROUNDS TAB
