@@ -321,6 +321,18 @@ class _LiveUpdaterScreenState extends State<LiveUpdaterScreen> {
     if (!matchSnap.exists) return;
     final match = matchSnap.data()!;
 
+if (match['processed'] == true)
+ {
+  await CustomDialog.show(
+    context,
+    title: 'Already Completed',
+    message: 'This match has already been processed.',
+    type: DialogType.error,
+  );
+  return;
+}
+
+
     final int scoreA = match['scoreA'] ?? 0;
     final int scoreB = match['scoreB'] ?? 0;
     final String teamAId = match['teamAId'];
@@ -331,38 +343,48 @@ class _LiveUpdaterScreenState extends State<LiveUpdaterScreen> {
     final leagueData = leagueSnap.data();
     final String leagueType = leagueData?['MatchesSystem'] ?? 'home_and_away';
 
-    if (leagueType == 'Knockout') {
-      // call your knockout manager only
 if (leagueType == 'Knockout') {
-  // call the standalone knockout handler
+  // ✅ Knockout only
   await handleKnockoutMatch(
     firestore: _firestore,
     match: match,
     scoreA: scoreA,
     scoreB: scoreB,
   );
+
+  await matchRef.update({
+  'status': 'completed',
+  'processed': true,
+  'lastUpdated': FieldValue.serverTimestamp(),
+});
+
+
+} else {
+  // ✅ Home & Away (League system)
+  await Future.wait([
+    _updateStandings(
+      leagueId: widget.leagueId,
+      teamId: teamAId,
+      groupId: groupId,
+      goalsFor: scoreA,
+      goalsAgainst: scoreB,
+    ),
+    _updateStandings(
+      leagueId: widget.leagueId,
+      teamId: teamBId,
+      groupId: groupId,
+      goalsFor: scoreB,
+      goalsAgainst: scoreA,
+    ),
+matchRef.update({
+  'status': 'completed',
+  'processed': true,
+  'lastUpdated': FieldValue.serverTimestamp(),
+}),
+
+  ]);
 }
-else {
-      // Home & Away
-      await Future.wait([
-        _updateStandings(
-          leagueId: widget.leagueId,
-          teamId: teamAId,
-          groupId: groupId,
-          goalsFor: scoreA,
-          goalsAgainst: scoreB,
-        ),
-        _updateStandings(
-          leagueId: widget.leagueId,
-          teamId: teamBId,
-          groupId: groupId,
-          goalsFor: scoreB,
-          goalsAgainst: scoreA,
-        ),
-        matchRef.update({'status': 'completed', 'lastUpdated': FieldValue.serverTimestamp()}),
-      ]);
-    }
-    }
+
 
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
