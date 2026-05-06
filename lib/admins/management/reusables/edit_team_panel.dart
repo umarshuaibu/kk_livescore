@@ -1,46 +1,50 @@
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:kklivescoreadmin/admins/management/reusables/constants.dart';
-import 'package:kklivescoreadmin/admins/management/reusables/custom_dialog.dart';
-import 'package:multi_select_flutter/multi_select_flutter.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:kklivescoreadmin/admins/management/reusables/constants.dart';
 import 'package:kklivescoreadmin/constants/colors.dart';
+import 'package:multi_select_flutter/multi_select_flutter.dart';
 
 import '../models/team_model.dart';
 import '../models/player_model.dart';
 import '../models/coach_model.dart';
-import '../services/team_service.dart';
 import '../services/player_service.dart';
 import '../services/coach_service.dart';
+import '../services/team_service.dart';
+import '../reusables/custom_dialog.dart';
 import '../reusables/custom_progress_indicator.dart';
 
-class CreateTeamPanel extends StatefulWidget {
+class EditTeamPanel extends StatefulWidget {
+  /// The team to edit
+  final Team team;
+
+  /// Called when edit is saved or panel is dismissed
   final VoidCallback onDone;
 
-  const CreateTeamPanel({
+  const EditTeamPanel({
     super.key,
+    required this.team,
     required this.onDone,
   });
 
-
   @override
-  State<CreateTeamPanel> createState() => _CreateTeamScreenState();
+  State<EditTeamPanel> createState() => _EditTeamPanelState();
 }
 
-class _CreateTeamScreenState extends State<CreateTeamPanel>
+class _EditTeamPanelState extends State<EditTeamPanel>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final TeamService _teamService = TeamService();
   final PlayerService _playerService = PlayerService();
   final CoachService _coachService = CoachService();
 
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _abbrController = TextEditingController();
-  final TextEditingController _tmNameController = TextEditingController();
-  final TextEditingController _tmPhoneController = TextEditingController();
+  late TextEditingController _nameController;
+  late TextEditingController _abbrController;
+  late TextEditingController _tmNameController;
+  late TextEditingController _tmPhoneController;
 
   String? _selectedCoachId;
   List<String> _selectedPlayerIds = [];
@@ -49,19 +53,17 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
   final List<Coach> _availableCoaches = [];
   final Set<String> _unassignedCoachIds = {};
 
-  Uint8List? _imageBytes;
-  String? _logoUrl;
+  Uint8List? _imageBytes;         // newly picked image
+  bool _logoHovered = false;
+  bool _isPicking = false;
 
   final ImagePicker _picker = ImagePicker();
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
-  bool _loading = false;
+  bool _isLoading = true;
   bool _isSubmitting = false;
   bool _fetchError = false;
-  bool _isPicking = false;
-  bool _logoHovered = false;
 
-  // ── Slide-in animation ──
   late AnimationController _slideCtrl;
   late Animation<Offset> _slideAnim;
   late Animation<double> _fadeAnim;
@@ -69,21 +71,31 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
   @override
   void initState() {
     super.initState();
-    _loadInitialData();
+    // Pre-fill from existing team
+    _nameController =
+        TextEditingController(text: widget.team.name);
+    _abbrController =
+        TextEditingController(text: widget.team.abbr ?? '');
+    _tmNameController =
+        TextEditingController(text: widget.team.tmName ?? '');
+    _tmPhoneController =
+        TextEditingController(text: widget.team.tmPhone ?? '');
+    _selectedCoachId = widget.team.coachId;
+    _selectedPlayerIds =
+        List<String>.from(widget.team.players ?? []);
 
     _slideCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
+        vsync: this, duration: const Duration(milliseconds: 320));
     _slideAnim = Tween<Offset>(
       begin: const Offset(1.0, 0.0),
       end: Offset.zero,
-    ).animate(
-        CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
+    ).animate(CurvedAnimation(
+        parent: _slideCtrl, curve: Curves.easeOutCubic));
     _fadeAnim =
         CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut);
-
     _slideCtrl.forward();
+
+    _loadInitialData();
   }
 
   @override
@@ -96,10 +108,10 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     super.dispose();
   }
 
-  // ================= LOAD DATA =================
+  // ── LOAD DATA ──
   Future<void> _loadInitialData() async {
     setState(() {
-      _loading = true;
+      _isLoading = true;
       _fetchError = false;
     });
 
@@ -107,12 +119,20 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
       final players = await _playerService.fetchPlayers();
       final coaches = await _coachService.fetchCoaches();
 
-      final freePlayers = players
-          .where((p) => p.team == null || p.team!.trim().isEmpty)
-          .toList();
+      // Free players OR already in this team
+      final teamPlayerIds =
+          Set<String>.from(widget.team.players ?? []);
+      final freePlayers = players.where((p) =>
+          p.team == null ||
+          p.team!.trim().isEmpty ||
+          (p.teamId != null && p.teamId == widget.team.id)).toList();
+
+      // Free coaches OR already coaching this team
       final freeCoachIds = coaches
-          .where(
-              (c) => c.teamId == null || c.teamId!.trim().isEmpty)
+          .where((c) =>
+              c.teamId == null ||
+              c.teamId!.trim().isEmpty ||
+              c.teamId == widget.team.id)
           .map((c) => c.id)
           .toSet();
 
@@ -128,7 +148,7 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
           ..addAll(freeCoachIds);
       });
     } catch (e) {
-      debugPrint('[_loadInitialData] failed: $e');
+      debugPrint('[EditTeamPanel] load error: $e');
       setState(() => _fetchError = true);
 
       await CustomDialog.show(
@@ -141,42 +161,39 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
         onConfirm: _loadInitialData,
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ================= PICK IMAGE =================
+  // ── PICK IMAGE ──
   Future<void> _pickImage() async {
     if (_isPicking) return;
     _isPicking = true;
-
     try {
       final pickedFile =
           await _picker.pickImage(source: ImageSource.gallery);
       if (pickedFile == null) return;
 
       final bytes = await pickedFile.readAsBytes();
-      final compressedBytes = await _compressImage(bytes);
+      final compressed = await _compressImage(bytes);
 
-      if (compressedBytes == null) {
+      if (compressed == null) {
         await CustomDialog.show(context,
             title: 'Image Error',
             message: 'Unable to process the selected image.',
             type: DialogType.error);
         return;
       }
-
-      if (compressedBytes.lengthInBytes > 200 * 1024) {
+      if (compressed.lengthInBytes > 200 * 1024) {
         await CustomDialog.show(context,
             title: 'Image Too Large',
             message: 'Please choose a smaller image.',
             type: DialogType.warning);
         return;
       }
-
-      setState(() => _imageBytes = compressedBytes);
+      setState(() => _imageBytes = compressed);
     } catch (e) {
-      debugPrint('[_pickImage] error: $e');
+      debugPrint('[EditTeamPanel] pickImage error: $e');
       await CustomDialog.show(context,
           title: 'Pick Error',
           message: 'Failed to pick image.',
@@ -186,7 +203,6 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     }
   }
 
-  // ================= COMPRESS =================
   Future<Uint8List?> _compressImage(Uint8List bytes) async {
     try {
       final compressed = await FlutterImageCompress.compressWithList(
@@ -197,12 +213,11 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
       );
       return compressed.isNotEmpty ? compressed : null;
     } catch (e) {
-      debugPrint('[_compressImage] error: $e');
+      debugPrint('[EditTeamPanel] compress error: $e');
       return null;
     }
   }
 
-  // ================= UPLOAD =================
   Future<String?> _uploadImage() async {
     try {
       if (_imageBytes == null) return null;
@@ -213,7 +228,7 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
           _imageBytes!, SettableMetadata(contentType: 'image/jpeg'));
       return await ref.getDownloadURL();
     } catch (e) {
-      debugPrint('[_uploadImage] error: $e');
+      debugPrint('[EditTeamPanel] upload error: $e');
       await CustomDialog.show(context,
           title: 'Upload Error',
           message: 'Failed to upload image.',
@@ -222,7 +237,7 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     }
   }
 
-  // ================= VALIDATE PHONE =================
+  // ── VALIDATE PHONE ──
   String? _validatePhone(String? v) {
     if (v == null || v.trim().isEmpty) return null;
     final normalized =
@@ -231,93 +246,89 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     return 'Please enter a valid phone number';
   }
 
-  // ================= SUBMIT =================
+  // ── SUBMIT ──
   Future<void> _submitForm() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    if (_imageBytes == null) {
-      await CustomDialog.show(context,
-          title: 'Logo Required',
-          message: 'Please select a team logo.',
-          type: DialogType.warning);
-      return;
-    }
-
-    setState(() {
-      _isSubmitting = true;
-      _loading = true;
-    });
+    setState(() => _isSubmitting = true);
 
     try {
-      _logoUrl = await _uploadImage();
-      if (_logoUrl == null) return;
+      // Upload new logo only if changed
+      String? logoUrl = widget.team.logoUrl;
+      if (_imageBytes != null) {
+        final uploaded = await _uploadImage();
+        if (uploaded != null) logoUrl = uploaded;
+      }
 
-      final team = Team(
-        id: '',
-        name: _nameController.text.trim(),
-        abbr: _abbrController.text.trim(),
-        coachId: _selectedCoachId,
-        logoUrl: _logoUrl,
-        players: List<String>.from(_selectedPlayerIds),
-        tmName: _tmNameController.text.trim().isNotEmpty
+      final updates = <String, dynamic>{
+        'name': _nameController.text.trim(),
+        'abbr': _abbrController.text.trim(),
+        'coachId': _selectedCoachId,
+        'logoUrl': logoUrl,
+        'players': _selectedPlayerIds,
+        'tmName': _tmNameController.text.trim().isNotEmpty
             ? _tmNameController.text.trim()
             : null,
-        tmPhone: _tmPhoneController.text.trim().isNotEmpty
+        'tmPhone': _tmPhoneController.text.trim().isNotEmpty
             ? _tmPhoneController.text.trim()
             : null,
-      );
+      };
 
-      final newTeamId = await _teamService.addTeam(team);
+      await FirebaseFirestore.instance
+          .collection('teams')
+          .doc(widget.team.id)
+          .update(updates);
 
-      for (final playerId in _selectedPlayerIds) {
-        await _playerService.updatePlayerTeam(playerId, newTeamId);
+      // Sync player teamId/team fields for newly added/removed players
+      final oldIds =
+          Set<String>.from(widget.team.players ?? []);
+      final newIds = Set<String>.from(_selectedPlayerIds);
+
+      // Players removed from team
+      for (final pid in oldIds.difference(newIds)) {
+        await _playerService.updatePlayerTeam(pid, '');
+      }
+      // Players added to team
+      for (final pid in newIds.difference(oldIds)) {
+        await _playerService.updatePlayerTeam(pid, widget.team.id);
       }
 
-      if (_selectedCoachId != null && _selectedCoachId!.isNotEmpty) {
-        await _coachService.updateCoachTeam(
-            _selectedCoachId!, newTeamId);
+      // Sync coach assignment
+      final oldCoachId = widget.team.coachId;
+      if (oldCoachId != _selectedCoachId) {
+        if (oldCoachId != null) {
+          await _coachService.updateCoachTeam(oldCoachId, '');
+        }
+        if (_selectedCoachId != null &&
+            _selectedCoachId!.isNotEmpty) {
+          await _coachService.updateCoachTeam(
+              _selectedCoachId!, widget.team.id);
+        }
       }
 
-      await CustomDialog.show(
-        context,
-        title: 'Success',
-        message: 'Team created successfully!',
-        type: DialogType.success,
-        confirmText: 'OK',
-        onConfirm: () {
-          try {
-            context.go('/admin_panel');
-          } catch (_) {
-            Navigator.of(context).maybePop();
-          }
-        },
-      );
-    } catch (e) {
-      debugPrint('[_submitForm] error: $e');
-      await CustomDialog.show(context,
-          title: 'Error',
-          message:
-              'An error occurred while creating the team. Please try again.',
-          type: DialogType.error);
-    } finally {
       if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-          _loading = false;
-        });
+        CustomDialog.show(context,
+            title: 'Updated',
+            message: 'Team updated successfully!',
+            type: DialogType.success,
+            onConfirm: widget.onDone);
       }
+    } catch (e) {
+      debugPrint('[EditTeamPanel] submit error: $e');
+      if (mounted) {
+        CustomDialog.show(context,
+            title: 'Error',
+            message:
+                'An error occurred while updating the team. Please try again.',
+            type: DialogType.error);
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
-  void _dismiss() {
-    try {
-      context.go('/admin_panel');
-    } catch (_) {
-      Navigator.of(context).maybePop();
-    }
-  }
+  void _dismiss() => widget.onDone();
 
-  // ================= BUILD =================
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -325,16 +336,17 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
 
     return Stack(
       children: [
-        // ---- DIMMED BACKDROP ----
+        // Backdrop
         FadeTransition(
           opacity: _fadeAnim,
           child: GestureDetector(
             onTap: _dismiss,
-            child: Container(color: Colors.black.withOpacity(0.45)),
+            child:
+                Container(color: Colors.black.withOpacity(0.45)),
           ),
         ),
 
-        // ---- SIDE PANEL ----
+        // Panel
         Positioned(
           top: 0,
           right: 0,
@@ -355,16 +367,17 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
                 ),
                 child: Column(
                   children: [
-                    _buildPanelHeader(),
+                    _buildHeader(),
                     Expanded(
-                      child: _loading && _availablePlayers.isEmpty
+                      child: _isLoading
                           ? const Center(
                               child: CustomProgressIndicator())
                           : _fetchError
                               ? _buildFetchError()
                               : SingleChildScrollView(
-                                  padding: const EdgeInsets.fromLTRB(
-                                      20, 20, 20, 32),
+                                  padding:
+                                      const EdgeInsets.fromLTRB(
+                                          20, 20, 20, 32),
                                   child: _buildForm(),
                                 ),
                     ),
@@ -375,7 +388,6 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
           ),
         ),
 
-        // ---- SUBMITTING OVERLAY ----
         if (_isSubmitting)
           Positioned(
             top: 0,
@@ -391,8 +403,7 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     );
   }
 
-  // ================= PANEL HEADER =================
-  Widget _buildPanelHeader() {
+  Widget _buildHeader() {
     return Container(
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + 14,
@@ -403,9 +414,8 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
       decoration: BoxDecoration(
         color: const Color(0xFF1A1F2E),
         border: Border(
-          bottom:
-              BorderSide(color: Colors.white.withOpacity(0.07)),
-        ),
+            bottom:
+                BorderSide(color: Colors.white.withOpacity(0.07))),
       ),
       child: Row(
         children: [
@@ -420,25 +430,19 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
                 color: AppColors.primaryColor2, size: 20),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Create Team',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                SizedBox(height: 1),
-                Text(
-                  'Fill in the details below',
-                  style: TextStyle(
-                      color: Color(0xFF6B7280), fontSize: 11),
-                ),
+                const Text('Edit Team',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 1),
+                Text(widget.team.name,
+                    style: const TextStyle(
+                        color: Color(0xFF6B7280), fontSize: 11)),
               ],
             ),
           ),
@@ -462,7 +466,6 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     );
   }
 
-  // ================= FETCH ERROR STATE =================
   Widget _buildFetchError() {
     return Center(
       child: Padding(
@@ -515,18 +518,17 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     );
   }
 
-  // ================= FORM =================
   Widget _buildForm() {
     return Form(
       key: _formKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── LOGO PICKER ──
+          // Logo picker
           Center(child: _buildLogoPicker()),
           const SizedBox(height: 22),
 
-          // ── TEAM NAME + ABBR ──
+          // Name + Abbr
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -535,11 +537,12 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
                 child: _buildField(
                   controller: _nameController,
                   label: 'Team Name',
-                  hint: 'e.g. Ashafa Boys FC',
+                  hint: 'e.g. Lagos Lions FC',
                   icon: Icons.shield_outlined,
-                  validator: (v) => v == null || v.trim().isEmpty
-                      ? 'Please enter a team name'
-                      : null,
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty
+                          ? 'Please enter a team name'
+                          : null,
                 ),
               ),
               const SizedBox(width: 12),
@@ -548,38 +551,40 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
                 child: _buildField(
                   controller: _abbrController,
                   label: 'Abbr.',
-                  hint: 'ASB FC',
+                  hint: 'LLF',
                   icon: Icons.short_text_rounded,
-                  validator: (v) => v == null || v.trim().isEmpty
-                      ? 'Required'
-                      : null,
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty
+                          ? 'Required'
+                          : null,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 14),
 
-          // ── COACH ──
+          // Coach
           _sectionLabel('Coach (optional)'),
           const SizedBox(height: 8),
           _buildCoachDropdown(),
           const SizedBox(height: 14),
 
-          // ── PLAYERS ──
+          // Players
           _sectionLabel('Players (optional)'),
           const SizedBox(height: 8),
           _buildPlayersSelector(),
           const SizedBox(height: 14),
 
-          // ── TEAM MANAGER ──
+          // Manager name
           _buildField(
             controller: _tmNameController,
             label: 'Manager Name (optional)',
-            hint: 'e.g. Muhammad Kabir',
+            hint: 'e.g. Emeka Obi',
             icon: Icons.badge_outlined,
           ),
           const SizedBox(height: 14),
 
+          // Manager phone
           _buildField(
             controller: _tmPhoneController,
             label: 'Manager Phone (optional)',
@@ -590,11 +595,9 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
           ),
           const SizedBox(height: 24),
 
-          // ── SUBMIT ──
-          _buildSubmitButton(),
+          _buildSaveButton(),
           const SizedBox(height: 10),
 
-          // ── CANCEL ──
           GestureDetector(
             onTap: _dismiss,
             child: Container(
@@ -619,7 +622,6 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     );
   }
 
-  // ================= LOGO PICKER =================
   Widget _buildLogoPicker() {
     return MouseRegion(
       onEnter: (_) => setState(() => _logoHovered = true),
@@ -659,35 +661,53 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
                     ),
                   ],
                 )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.add_photo_alternate_outlined,
-                      color: _logoHovered
-                          ? AppColors.primaryColor
-                          : Colors.grey.shade600,
-                      size: 24,
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      'Team Logo',
-                      style: TextStyle(
-                        color: _logoHovered
-                            ? AppColors.primaryColor
-                            : Colors.grey.shade600,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+              : widget.team.logoUrl != null &&
+                      widget.team.logoUrl!.isNotEmpty
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(widget.team.logoUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                _emptyLogoPlaceholder()),
+                        AnimatedOpacity(
+                          opacity: _logoHovered ? 1.0 : 0.0,
+                          duration: const Duration(milliseconds: 200),
+                          child: Container(
+                            color: Colors.black.withOpacity(0.5),
+                            child: const Icon(Icons.edit_rounded,
+                                color: Colors.white, size: 22),
+                          ),
+                        ),
+                      ],
+                    )
+                  : _emptyLogoPlaceholder(),
         ),
       ),
     );
   }
 
-  // ================= COACH DROPDOWN =================
+  Widget _emptyLogoPlaceholder() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.add_photo_alternate_outlined,
+            color: _logoHovered
+                ? AppColors.primaryColor
+                : Colors.grey.shade600,
+            size: 24),
+        const SizedBox(height: 5),
+        Text('Logo',
+            style: TextStyle(
+                color: _logoHovered
+                    ? AppColors.primaryColor
+                    : Colors.grey.shade600,
+                fontSize: 10,
+                fontWeight: FontWeight.w500)),
+      ],
+    );
+  }
+
   Widget _buildCoachDropdown() {
     return Container(
       decoration: BoxDecoration(
@@ -698,7 +718,9 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: DropdownButtonHideUnderline(
         child: DropdownButtonFormField<String>(
-          value: _selectedCoachId,
+          value: _unassignedCoachIds.contains(_selectedCoachId)
+              ? _selectedCoachId
+              : null,
           dropdownColor: const Color(0xFF1E2330),
           style: const TextStyle(color: Colors.white, fontSize: 13),
           icon: Icon(Icons.keyboard_arrow_down_rounded,
@@ -709,8 +731,6 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
                 color: Colors.grey.shade600, size: 17),
             border: InputBorder.none,
             contentPadding: EdgeInsets.zero,
-            errorStyle:
-                const TextStyle(fontSize: 10, height: 1.2),
           ),
           hint: Text('Select a coach',
               style: TextStyle(
@@ -758,45 +778,34 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     );
   }
 
-  // ================= PLAYERS MULTI-SELECT =================
   Widget _buildPlayersSelector() {
-    final selectedCount = _selectedPlayerIds.length;
+    final count = _selectedPlayerIds.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Selected count badge
-        if (selectedCount > 0)
+        if (count > 0)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryColor.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: AppColors.primaryColor
-                            .withOpacity(0.3)),
-                  ),
-                  child: Text(
-                    '$selectedCount player${selectedCount == 1 ? '' : 's'} selected',
-                    style: TextStyle(
-                      color: AppColors.primaryColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.primaryColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: AppColors.primaryColor.withOpacity(0.3)),
+              ),
+              child: Text(
+                '$count player${count == 1 ? '' : 's'} selected',
+                style: TextStyle(
+                  color: AppColors.primaryColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
                 ),
-              ],
+              ),
             ),
           ),
-
-        // Multi-select button styled to match panel
         Theme(
           data: ThemeData.dark().copyWith(
             colorScheme: ColorScheme.dark(
@@ -810,13 +819,15 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
                   AppColors.primaryColor.withOpacity(0.25),
               labelStyle: const TextStyle(
                   color: Colors.white, fontSize: 12),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 4),
             ),
           ),
           child: MultiSelectDialogField<Player>(
             items: _availablePlayers
                 .map((p) => MultiSelectItem<Player>(p, p.name))
+                .toList(),
+            initialValue: _availablePlayers
+                .where((p) =>
+                    _selectedPlayerIds.contains(p.id))
                 .toList(),
             title: const Text('Select Players',
                 style: TextStyle(color: Colors.white)),
@@ -847,7 +858,40 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
     );
   }
 
-  // ================= SECTION LABEL =================
+  Widget _buildSaveButton() {
+    return SizedBox(
+      height: 48,
+      child: ElevatedButton(
+        onPressed: _isSubmitting ? null : _submitForm,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primaryColor,
+          disabledBackgroundColor:
+              AppColors.primaryColor.withOpacity(0.35),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+        ),
+        child: _isSubmitting
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
+            : const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.save_rounded, size: 17),
+                  SizedBox(width: 8),
+                  Text('Save Changes',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600)),
+                ],
+              ),
+      ),
+    );
+  }
+
   Widget _sectionLabel(String label) {
     return Row(
       children: [
@@ -860,27 +904,22 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
           ),
         ),
         const SizedBox(width: 7),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.grey.shade400,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.4,
-          ),
-        ),
+        Text(label,
+            style: TextStyle(
+                color: Colors.grey.shade400,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4)),
       ],
     );
   }
 
-  // ================= TEXT FIELD =================
   Widget _buildField({
     required TextEditingController controller,
     required String label,
     required String hint,
     required IconData icon,
     TextInputType keyboardType = TextInputType.text,
-    TextCapitalization textCapitalization = TextCapitalization.none,
     String? Function(String?)? validator,
   }) {
     return Column(
@@ -891,7 +930,6 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
         TextFormField(
           controller: controller,
           keyboardType: keyboardType,
-          textCapitalization: textCapitalization,
           validator: validator,
           style: const TextStyle(color: Colors.white, fontSize: 13),
           decoration: InputDecoration(
@@ -934,47 +972,6 @@ class _CreateTeamScreenState extends State<CreateTeamPanel>
           ),
         ),
       ],
-    );
-  }
-
-  // ================= SUBMIT BUTTON =================
-  Widget _buildSubmitButton() {
-    return SizedBox(
-      height: 48,
-      child: ElevatedButton(
-        onPressed: _isSubmitting ? null : _submitForm,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primaryColor,
-          disabledBackgroundColor:
-              AppColors.primaryColor.withOpacity(0.35),
-          foregroundColor: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
-        ),
-        child: _isSubmitting
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white),
-              )
-            : const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.shield_rounded, size: 17),
-                  SizedBox(width: 8),
-                  Text(
-                    'Create Team',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                ],
-              ),
-      ),
     );
   }
 }

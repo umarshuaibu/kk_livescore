@@ -6,7 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:kklivescoreadmin/admins/management/models/player_model.dart';
 import 'package:kklivescoreadmin/admins/management/screens/edit_coach_screen.dart';
-import 'package:kklivescoreadmin/admins/management/screens/edit_player_screen.dart';
+//import 'package:kklivescoreadmin/admins/management/screens/edit_player_screen.dart';
 import 'package:kklivescoreadmin/admins/management/screens/edit_team_screen.dart';
 
 import 'firebase_options.dart';
@@ -103,10 +103,10 @@ if (location.startsWith('/public_test')) {
         ),
 
         // ===== TEAM =====
-        GoRoute(
+       /* GoRoute(
           path: '/create_team',
           builder: (context, state) => const CreateTeamScreen(),
-        ),
+        ),*/
         GoRoute(
           path: '/team_list',
           builder: (context, state) => TeamListScreen(),
@@ -120,16 +120,16 @@ GoRoute(
 ),
 
         // ===== PLAYER =====
-        GoRoute(
+       /* GoRoute(
           path: '/create_player',
           builder: (context, state) => CreatePlayerScreen(
             onDone: () {
               context.go('/player_list');
             },
           ),
-        ),
+        ),*/
 
-GoRoute(
+/*GoRoute(
   path: '/edit_player',
   builder: (context, state) {
     final playerId = state.extra as String;
@@ -139,7 +139,7 @@ GoRoute(
       onDone: () => context.go('/player_list'),
     );
   },
-),
+),*/
 
 // COACH
 GoRoute(
@@ -172,10 +172,10 @@ GoRoute(
         ),
 
         // ===== COACH =====
-        GoRoute(
+       /* GoRoute(
           path: '/create_coach',
           builder: (context, state) => const CreateCoachScreen(),
-        ),
+        ),*/
         GoRoute(
           path: '/coach_list',
           builder: (context, state) => CoachListScreen(),

@@ -1,55 +1,54 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:kklivescoreadmin/admins/management/reusables/constants.dart';
 import 'package:kklivescoreadmin/constants/colors.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../reusables/constants.dart';
+import '../models/player_model.dart';
 import '../reusables/custom_dialog.dart';
 import '../reusables/custom_progress_indicator.dart';
-import '../models/player_model.dart';
 
-class CreatePlayerPanel extends StatefulWidget {
+class EditPlayerPanel extends StatefulWidget {
+  /// The player to edit
+  final Player player;
+
+  /// Called when edit is saved or panel is dismissed
   final VoidCallback onDone;
 
-  const CreatePlayerPanel({
+  const EditPlayerPanel({
     super.key,
+    required this.player,
     required this.onDone,
   });
 
   @override
-  State<CreatePlayerPanel> createState() => _CreatePlayerScreenState();
+  State<EditPlayerPanel> createState() => _EditPlayerPanelState();
 }
 
-class _CreatePlayerScreenState extends State<CreatePlayerPanel>
-    with TickerProviderStateMixin {
+class _EditPlayerPanelState extends State<EditPlayerPanel>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
 
-  // Controllers
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _jerseyNoController = TextEditingController();
-  final TextEditingController _stateController = TextEditingController();
-  final TextEditingController _townController = TextEditingController();
-  final TextEditingController _dobController = TextEditingController();
+  late TextEditingController _nameController;
+  late TextEditingController _jerseyNoController;
+  late TextEditingController _stateController;
+  late TextEditingController _townController;
+  late TextEditingController _dobController;
 
-  // pickers / storage
   final ImagePicker _picker = ImagePicker();
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
-  // UI state
-  bool _isLoading = false;
+  bool _isLoading = true;
   bool _isSubmitting = false;
   double? _uploadProgress;
   bool _imageHovered = false;
 
-  // form state
   XFile? _pickedFile;
   File? _imageFile;
   Uint8List? _webImage;
@@ -58,7 +57,6 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
   String? _selectedTeamId;
   String? _selectedTeamName;
 
-  // Data
   final List<String> _positions = [
     'Goalkeeper',
     'Defender',
@@ -67,30 +65,46 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
   ];
   final List<Map<String, String>> _teams = [];
 
-  // Animation
-  late AnimationController _slideInController;
-  late Animation<Offset> _slideInAnimation;
-  late Animation<double> _fadeAnimation;
+  late AnimationController _slideCtrl;
+  late Animation<Offset> _slideAnim;
+  late Animation<double> _fadeAnim;
 
   @override
   void initState() {
     super.initState();
-    _fetchTeams();
-
-    _slideInController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
+    // Pre-fill from existing player
+    _nameController =
+        TextEditingController(text: widget.player.name);
+    _jerseyNoController =
+        TextEditingController(text: widget.player.jerseyNo.toString());
+    _stateController =
+        TextEditingController(text: widget.player.state);
+    _townController =
+        TextEditingController(text: widget.player.town);
+    _selectedDateOfBirth = widget.player.dateOfBirth;
+    _selectedPosition = widget.player.position;
+    _selectedTeamId = widget.player.teamId;
+    _selectedTeamName = widget.player.team;
+    _dobController = TextEditingController(
+      text: _selectedDateOfBirth == null
+          ? ''
+          : '${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}/'
+              '${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}/'
+              '${_selectedDateOfBirth!.year}',
     );
-    _slideInAnimation = Tween<Offset>(
+
+    _slideCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 320));
+    _slideAnim = Tween<Offset>(
       begin: const Offset(1.0, 0.0),
       end: Offset.zero,
-    ).animate(
-        CurvedAnimation(parent: _slideInController, curve: Curves.easeOutCubic));
+    ).animate(CurvedAnimation(
+        parent: _slideCtrl, curve: Curves.easeOutCubic));
+    _fadeAnim =
+        CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut);
+    _slideCtrl.forward();
 
-    _fadeAnimation =
-        CurvedAnimation(parent: _slideInController, curve: Curves.easeOut);
-
-    _slideInController.forward();
+    _fetchTeams();
   }
 
   @override
@@ -100,22 +114,15 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
     _stateController.dispose();
     _townController.dispose();
     _dobController.dispose();
-    _slideInController.dispose();
+    _slideCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _setLoading(bool loading) async {
-    if (!mounted) return;
-    setState(() => _isLoading = loading);
-  }
-
-  // ================= FETCH TEAMS =================
+  // ── FETCH TEAMS ──
   Future<void> _fetchTeams() async {
-    await _setLoading(true);
     try {
       final snapshot =
           await FirebaseFirestore.instance.collection('teams').get();
-      if (!mounted) return;
       _teams.clear();
       for (final doc in snapshot.docs) {
         final name = (doc.data()['name'] ?? '') as String;
@@ -129,11 +136,11 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
             type: DialogType.error);
       }
     } finally {
-      await _setLoading(false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ================= PERMISSIONS =================
+  // ── PERMISSIONS ──
   Future<bool> _requestPermission() async {
     if (kIsWeb) return true;
     try {
@@ -152,7 +159,7 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
     return false;
   }
 
-  // ================= PICK IMAGE =================
+  // ── PICK IMAGE ──
   Future<void> _pickImage() async {
     FocusScope.of(context).unfocus();
     final granted = await _requestPermission();
@@ -164,14 +171,15 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
       return;
     }
     try {
-      final picked = await _picker.pickImage(source: ImageSource.gallery);
+      final picked =
+          await _picker.pickImage(source: ImageSource.gallery);
       if (picked == null) return;
       _pickedFile = picked;
       if (kIsWeb) {
         _webImage = await picked.readAsBytes();
       } else {
-        _imageFile =
-            await _compressImage(File(picked.path), maxBytes: 150 * 1024);
+        _imageFile = await _compressImage(
+            File(picked.path), maxBytes: 150 * 1024);
       }
       if (mounted) setState(() {});
     } catch (e) {
@@ -182,15 +190,16 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
     }
   }
 
-  // ================= COMPRESS =================
-  Future<File> _compressImage(File file, {required int maxBytes}) async {
+  Future<File> _compressImage(File file,
+      {required int maxBytes}) async {
     try {
       int quality = 85;
       File? compressed;
       while (quality >= 30) {
         final targetPath =
             '${file.parent.path}/compressed_${DateTime.now().millisecondsSinceEpoch}_q$quality.jpg';
-        compressed = (await FlutterImageCompress.compressAndGetFile(
+        compressed =
+            (await FlutterImageCompress.compressAndGetFile(
           file.absolute.path,
           targetPath,
           quality: quality,
@@ -198,20 +207,19 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
           minHeight: 300,
         )) as File?;
         if (compressed == null) break;
-        if (await compressed.length() <= maxBytes) return compressed;
+        if (await compressed.length() <= maxBytes)
+          return compressed;
         quality -= 15;
       }
     } catch (_) {}
     return file;
   }
 
-  // ================= UPLOAD IMAGE =================
+  // ── UPLOAD IMAGE ──
   Future<String> _uploadImage() async {
-    final ref = _storage
-        .ref()
-        .child('players/${DateTime.now().millisecondsSinceEpoch}.jpg');
+    final ref = _storage.ref().child(
+        'players/${DateTime.now().millisecondsSinceEpoch}.jpg');
     UploadTask uploadTask;
-
     if (kIsWeb && _webImage != null) {
       uploadTask = ref.putData(_webImage!);
     } else if (_imageFile != null) {
@@ -220,44 +228,33 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
       throw 'No image selected';
     }
 
-    final completer = Completer<String>();
     _uploadProgress = 0.0;
-
-    uploadTask.snapshotEvents.listen((taskSnapshot) {
+    uploadTask.snapshotEvents.listen((e) {
       if (!mounted) return;
-      final progress = taskSnapshot.totalBytes > 0
-          ? taskSnapshot.bytesTransferred / taskSnapshot.totalBytes
-          : null;
-      setState(() => _uploadProgress = progress);
-    }, onError: (e) => completer.completeError(e));
+      setState(() => _uploadProgress = e.totalBytes > 0
+          ? e.bytesTransferred / e.totalBytes
+          : null);
+    });
 
-    try {
-      await uploadTask;
-      final url = await ref.getDownloadURL();
-      completer.complete(url);
-    } catch (e) {
-      if (!completer.isCompleted) completer.completeError(e);
-    }
-
-    final result = await completer.future;
+    await uploadTask;
+    final url = await ref.getDownloadURL();
     if (mounted) setState(() => _uploadProgress = null);
-    return result;
+    return url;
   }
 
-  // ================= PICK DOB =================
+  // ── PICK DOB ──
   Future<void> _pickDateOfBirth() async {
     FocusScope.of(context).unfocus();
     final picked = await showDatePicker(
       context: context,
-      initialDate: DateTime(2000, 1, 1),
+      initialDate: _selectedDateOfBirth ?? DateTime(2000),
       firstDate: DateTime(1960),
       lastDate: DateTime.now(),
       builder: (context, child) => Theme(
         data: ThemeData.dark().copyWith(
           colorScheme: ColorScheme.dark(
-            primary: AppColors.primaryColor2,
-            surface: const Color(0xFF1E2330),
-          ),
+              primary: AppColors.primaryColor2,
+              surface: const Color(0xFF1E2330)),
           dialogBackgroundColor: const Color(0xFF161A23),
         ),
         child: child!,
@@ -267,29 +264,25 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
     setState(() {
       _selectedDateOfBirth = picked;
       _dobController.text =
-          '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
+          '${picked.day.toString().padLeft(2, '0')}/'
+          '${picked.month.toString().padLeft(2, '0')}/'
+          '${picked.year}';
     });
   }
 
-  // ================= VALIDATE JERSEY =================
+  // ── VALIDATE JERSEY ──
   String? _validateJersey(String? val) {
-    if (val == null || val.trim().isEmpty) return 'Required';
+    if (val == null || val.trim().isEmpty)
+      return 'Please enter a jersey number';
     final n = int.tryParse(val);
-    if (n == null) return 'Invalid';
-    if (n <= 0 || n > 99) return '1–99 only';
+    if (n == null) return 'Please enter a valid number';
+    if (n <= 0 || n > 99) return 'Jersey must be between 1 and 99';
     return null;
   }
 
-  // ================= SUBMIT =================
+  // ── SUBMIT ──
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_pickedFile == null) {
-      CustomDialog.show(context,
-          title: 'Missing Image',
-          message: 'Please select a photo.',
-          type: DialogType.error);
-      return;
-    }
     if (_selectedDateOfBirth == null) {
       CustomDialog.show(context,
           title: 'Missing Date',
@@ -306,61 +299,71 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
     }
 
     setState(() => _isSubmitting = true);
-    await _setLoading(true);
 
     try {
-      final photoUrl = await _uploadImage();
-      final playersRef = FirebaseFirestore.instance.collection('players');
-      final newDocRef = playersRef.doc();
+      // Upload new photo only if changed
+      String photoUrl = widget.player.playerPhoto;
+      if (_pickedFile != null) photoUrl = await _uploadImage();
 
-      final player = Player(
-        id: newDocRef.id,
-        name: _nameController.text.trim(),
-        position: _selectedPosition!,
-        jerseyNo: int.parse(_jerseyNoController.text.trim()),
-        team: _selectedTeamName,
-        teamId: _selectedTeamId,
-        playerPhoto: photoUrl,
-        dateOfBirth: _selectedDateOfBirth!,
-        state: _stateController.text.trim(),
-        town: _townController.text.trim(),
-      );
+      final updates = <String, dynamic>{
+        'name': _nameController.text.trim(),
+        'position': _selectedPosition!,
+        'jerseyNo': int.parse(_jerseyNoController.text.trim()),
+        'team': _selectedTeamName,
+        'teamId': _selectedTeamId,
+        'playerPhoto': photoUrl,
+        'dateOfBirth': _selectedDateOfBirth!.toIso8601String(),
+        'state': _stateController.text.trim(),
+        'town': _townController.text.trim(),
+      };
 
-      await newDocRef.set(player.toMap());
+      await FirebaseFirestore.instance
+          .collection('players')
+          .doc(widget.player.id)
+          .update(updates);
 
-      if (_selectedTeamId != null && _selectedTeamId!.isNotEmpty) {
-        await FirebaseFirestore.instance
-            .collection('teams')
-            .doc(_selectedTeamId)
-            .update({
-          'players': FieldValue.arrayUnion([newDocRef.id])
-        });
+      // Update team arrays if team changed
+      if (widget.player.teamId != _selectedTeamId) {
+        // Remove from old team
+        if (widget.player.teamId != null) {
+          await FirebaseFirestore.instance
+              .collection('teams')
+              .doc(widget.player.teamId)
+              .update({
+            'players':
+                FieldValue.arrayRemove([widget.player.id])
+          });
+        }
+        // Add to new team
+        if (_selectedTeamId != null && _selectedTeamId!.isNotEmpty) {
+          await FirebaseFirestore.instance
+              .collection('teams')
+              .doc(_selectedTeamId)
+              .update({
+            'players': FieldValue.arrayUnion([widget.player.id])
+          });
+        }
       }
 
-      if (!mounted) return;
-      await _setLoading(false);
-      setState(() => _isSubmitting = false);
-
-      CustomDialog.show(
-        context,
-        title: 'Success',
-        message: 'Player created successfully.',
-        type: DialogType.success,
-        onConfirm: () => widget.onDone(),
-      );
+      if (mounted) {
+        CustomDialog.show(context,
+            title: 'Updated',
+            message: 'Player updated successfully!',
+            type: DialogType.success,
+            onConfirm: widget.onDone);
+      }
     } catch (e) {
       if (mounted) {
-        await _setLoading(false);
-        setState(() => _isSubmitting = false);
         CustomDialog.show(context,
             title: 'Error',
-            message: 'Failed to create player: $e',
+            message: 'Failed to update player: $e',
             type: DialogType.error);
       }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
-  // ================= BUILD =================
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -368,68 +371,64 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
 
     return Stack(
       children: [
-        // ---- DIMMED BACKDROP ----
+        // Backdrop
         FadeTransition(
-          opacity: _fadeAnimation,
+          opacity: _fadeAnim,
           child: GestureDetector(
             onTap: widget.onDone,
-            child: Container(color: Colors.black.withOpacity(0.45)),
+            child:
+                Container(color: Colors.black.withOpacity(0.45)),
           ),
         ),
 
-        // ---- SIDE PANEL ----
+        // Panel
         Positioned(
           top: 0,
           right: 0,
           bottom: 0,
           width: panelWidth,
           child: SlideTransition(
-            position: _slideInAnimation,
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xFF161A23),
-                border: Border(
-                  left: BorderSide(color: Colors.white.withOpacity(0.07)),
+            position: _slideAnim,
+            child: Material(
+              color: const Color(0xFF161A23),
+              elevation: 16,
+              shadowColor: Colors.black.withOpacity(0.5),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border(
+                    left: BorderSide(
+                        color: Colors.white.withOpacity(0.07)),
+                  ),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.4),
-                    blurRadius: 24,
-                    offset: const Offset(-8, 0),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  // ---- PANEL HEADER ----
-                  _buildPanelHeader(),
-
-                  // ---- UPLOAD PROGRESS BAR ----
-                  if (_uploadProgress != null)
-                    LinearProgressIndicator(
-                      value: _uploadProgress,
-                      backgroundColor: Colors.white.withOpacity(0.04),
-                      color: AppColors.primaryColor,
-                      minHeight: 3,
+                child: Column(
+                  children: [
+                    _buildHeader(),
+                    if (_uploadProgress != null)
+                      LinearProgressIndicator(
+                        value: _uploadProgress,
+                        backgroundColor:
+                            Colors.white.withOpacity(0.04),
+                        color: AppColors.primaryColor,
+                        minHeight: 3,
+                      ),
+                    Expanded(
+                      child: _isLoading
+                          ? const Center(
+                              child: CustomProgressIndicator())
+                          : SingleChildScrollView(
+                              padding:
+                                  const EdgeInsets.fromLTRB(
+                                      20, 20, 20, 32),
+                              child: _buildForm(),
+                            ),
                     ),
-
-                  // ---- SCROLLABLE CONTENT ----
-                  Expanded(
-                    child: _isLoading && _teams.isEmpty
-                        ? const Center(child: CustomProgressIndicator())
-                        : SingleChildScrollView(
-                            padding:
-                                const EdgeInsets.fromLTRB(20, 20, 20, 32),
-                            child: _buildForm(),
-                          ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
 
-        // ---- SUBMITTING OVERLAY (panel only) ----
         if (_isSubmitting)
           Positioned(
             top: 0,
@@ -445,8 +444,7 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
     );
   }
 
-  // ================= PANEL HEADER =================
-  Widget _buildPanelHeader() {
+  Widget _buildHeader() {
     return Container(
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + 14,
@@ -457,8 +455,8 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
       decoration: BoxDecoration(
         color: const Color(0xFF1A1F2E),
         border: Border(
-          bottom: BorderSide(color: Colors.white.withOpacity(0.07)),
-        ),
+            bottom:
+                BorderSide(color: Colors.white.withOpacity(0.07))),
       ),
       child: Row(
         children: [
@@ -469,29 +467,23 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
               color: AppColors.primaryColor.withOpacity(0.12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.person_add_rounded,
-                color: AppColors.secondaryColor, size: 20),
+            child: Icon(Icons.edit_rounded,
+                color: AppColors.primaryColor2, size: 20),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Register Player',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                SizedBox(height: 1),
-                Text(
-                  'Fill in the details below',
-                  style:
-                      TextStyle(color: Color(0xFF6B7280), fontSize: 11),
-                ),
+                const Text('Edit Player',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 1),
+                Text(widget.player.name,
+                    style: const TextStyle(
+                        color: Color(0xFF6B7280), fontSize: 11)),
               ],
             ),
           ),
@@ -503,7 +495,8 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.06),
                 borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: Colors.white.withOpacity(0.08)),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.08)),
               ),
               child: const Icon(Icons.close_rounded,
                   color: Colors.white70, size: 16),
@@ -514,30 +507,28 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
     );
   }
 
-  // ================= FORM =================
   Widget _buildForm() {
     return Form(
       key: _formKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ---- PHOTO ----
           Center(child: _buildPhotoPicker()),
           const SizedBox(height: 22),
 
-          // ---- NAME ----
           _buildField(
             controller: _nameController,
             label: 'Full Name',
-            hint: 'e.g. Anas KK',
+            hint: 'e.g. Umar Musa',
             icon: Icons.person_outline_rounded,
             textCapitalization: TextCapitalization.words,
-            validator: (v) =>
-                v == null || v.trim().isEmpty ? 'Please enter name' : null,
+            validator: (v) => v == null || v.trim().isEmpty
+                ? 'Please enter name'
+                : null,
           ),
           const SizedBox(height: 14),
 
-          // ---- JERSEY + POSITION ----
+          // Jersey + Position row
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -567,8 +558,9 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
                           .map((p) => DropdownMenuItem(
                               value: p, child: Text(p)))
                           .toList(),
-                      validator: (v) =>
-                          v == null ? 'Please select a position' : null,
+                      validator: (v) => v == null
+                          ? 'Please select a position'
+                          : null,
                       onChanged: (v) =>
                           setState(() => _selectedPosition = v),
                     ),
@@ -579,11 +571,12 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
           ),
           const SizedBox(height: 14),
 
-          // ---- TEAM ----
           _sectionLabel('Team (optional)'),
           const SizedBox(height: 8),
           _buildDropdown<String>(
-            value: _selectedTeamId,
+            value: _teams.any((t) => t['id'] == _selectedTeamId)
+                ? _selectedTeamId
+                : null,
             hint: 'Assign to a team',
             icon: Icons.shield_outlined,
             items: _teams
@@ -591,8 +584,9 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
                     value: t['id'], child: Text(t['name'] ?? '')))
                 .toList(),
             onChanged: (teamId) {
-              final teamName =
-                  _teams.firstWhere((t) => t['id'] == teamId)['name'];
+              final teamName = _teams
+                  .firstWhere((t) => t['id'] == teamId,
+                      orElse: () => {'name': ''})['name'];
               setState(() {
                 _selectedTeamId = teamId;
                 _selectedTeamName = teamName;
@@ -601,13 +595,12 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
           ),
           const SizedBox(height: 14),
 
-          // ---- DATE OF BIRTH ----
           _sectionLabel('Date of Birth'),
           const SizedBox(height: 8),
           _buildDateField(),
           const SizedBox(height: 14),
 
-          // ---- STATE + TOWN ----
+          // State + Town
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -617,8 +610,9 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
                   label: 'State',
                   hint: 'e.g. Kano',
                   icon: Icons.flag_outlined,
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty ? 'Required' : null,
+                  validator: (v) => v == null || v.trim().isEmpty
+                      ? 'Required'
+                      : null,
                 ),
               ),
               const SizedBox(width: 12),
@@ -626,21 +620,20 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
                 child: _buildField(
                   controller: _townController,
                   label: 'Town',
-                  hint: 'e.g. Samegu',
+                  hint: 'e.g. Panshekara',
                   icon: Icons.location_city_outlined,
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty ? 'Required' : null,
+                  validator: (v) => v == null || v.trim().isEmpty
+                      ? 'Required'
+                      : null,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 24),
 
-          // ---- SUBMIT ----
-          _buildSubmitButton(),
+          _buildSaveButton(),
           const SizedBox(height: 10),
 
-          // ---- CANCEL ----
           GestureDetector(
             onTap: widget.onDone,
             child: Container(
@@ -648,18 +641,15 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.04),
                 borderRadius: BorderRadius.circular(12),
-                border:
-                    Border.all(color: Colors.white.withOpacity(0.07)),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.07)),
               ),
               child: const Center(
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                child: Text('Cancel',
+                    style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500)),
               ),
             ),
           ),
@@ -668,7 +658,6 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
     );
   }
 
-  // ================= PHOTO PICKER =================
   Widget _buildPhotoPicker() {
     return MouseRegion(
       onEnter: (_) => setState(() => _imageHovered = true),
@@ -710,35 +699,139 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
                     ),
                   ],
                 )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.add_photo_alternate_outlined,
-                      color: _imageHovered
-                          ? AppColors.primaryColor
-                          : Colors.grey.shade600,
-                      size: 24,
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      'Photo',
-                      style: TextStyle(
-                        color: _imageHovered
-                            ? AppColors.primaryColor
-                            : Colors.grey.shade600,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+              : widget.player.playerPhoto.isNotEmpty
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(widget.player.playerPhoto,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                _emptyPhotoPlaceholder()),
+                        AnimatedOpacity(
+                          opacity: _imageHovered ? 1.0 : 0.0,
+                          duration: const Duration(milliseconds: 200),
+                          child: Container(
+                            color: Colors.black.withOpacity(0.5),
+                            child: const Icon(Icons.edit_rounded,
+                                color: Colors.white, size: 22),
+                          ),
+                        ),
+                      ],
+                    )
+                  : _emptyPhotoPlaceholder(),
         ),
       ),
     );
   }
 
-  // ================= SECTION LABEL =================
+  Widget _emptyPhotoPlaceholder() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.add_photo_alternate_outlined,
+            color: _imageHovered
+                ? AppColors.primaryColor
+                : Colors.grey.shade600,
+            size: 24),
+        const SizedBox(height: 5),
+        Text('Photo',
+            style: TextStyle(
+                color: _imageHovered
+                    ? AppColors.primaryColor
+                    : Colors.grey.shade600,
+                fontSize: 10,
+                fontWeight: FontWeight.w500)),
+      ],
+    );
+  }
+
+  Widget _buildDateField() {
+    return GestureDetector(
+      onTap: _pickDateOfBirth,
+      child: AbsorbPointer(
+        child: TextFormField(
+          controller: _dobController,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          validator: (v) => _selectedDateOfBirth == null
+              ? 'Please select date of birth'
+              : null,
+          decoration: InputDecoration(
+            hintText: 'Select date of birth',
+            hintStyle:
+                TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            prefixIcon: Icon(Icons.calendar_today_rounded,
+                color: Colors.grey.shade600, size: 17),
+            suffixIcon: Icon(Icons.keyboard_arrow_down_rounded,
+                color: Colors.grey.shade500, size: 18),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.05),
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 13),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(11),
+              borderSide:
+                  BorderSide(color: Colors.white.withOpacity(0.08)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(11),
+              borderSide:
+                  BorderSide(color: Colors.white.withOpacity(0.08)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(11),
+              borderSide: BorderSide(
+                  color: AppColors.primaryColor.withOpacity(0.55)),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(11),
+              borderSide:
+                  const BorderSide(color: Color(0xFFE57373)),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(11),
+              borderSide:
+                  const BorderSide(color: Color(0xFFE57373)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSaveButton() {
+    return SizedBox(
+      height: 48,
+      child: ElevatedButton(
+        onPressed: _isSubmitting ? null : _submitForm,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primaryColor,
+          disabledBackgroundColor:
+              AppColors.primaryColor.withOpacity(0.35),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+        ),
+        child: _isSubmitting
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
+            : const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.save_rounded, size: 17),
+                  SizedBox(width: 8),
+                  Text('Save Changes',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600)),
+                ],
+              ),
+      ),
+    );
+  }
+
   Widget _sectionLabel(String label) {
     return Row(
       children: [
@@ -751,20 +844,16 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
           ),
         ),
         const SizedBox(width: 7),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.grey.shade400,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.4,
-          ),
-        ),
+        Text(label,
+            style: TextStyle(
+                color: Colors.grey.shade400,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4)),
       ],
     );
   }
 
-  // ================= TEXT FIELD =================
   Widget _buildField({
     required TextEditingController controller,
     required String label,
@@ -812,20 +901,22 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(11),
-              borderSide: const BorderSide(color: Color(0xFFE57373)),
+              borderSide:
+                  const BorderSide(color: Color(0xFFE57373)),
             ),
             focusedErrorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(11),
-              borderSide: const BorderSide(color: Color(0xFFE57373)),
+              borderSide:
+                  const BorderSide(color: Color(0xFFE57373)),
             ),
-            errorStyle: const TextStyle(fontSize: 10, height: 1.2),
+            errorStyle:
+                const TextStyle(fontSize: 10, height: 1.2),
           ),
         ),
       ],
     );
   }
 
-  // ================= DROPDOWN =================
   Widget _buildDropdown<T>({
     required T? value,
     required String hint,
@@ -855,7 +946,8 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
                 Icon(icon, color: Colors.grey.shade600, size: 17),
             border: InputBorder.none,
             contentPadding: EdgeInsets.zero,
-            errorStyle: const TextStyle(fontSize: 10, height: 1.2),
+            errorStyle:
+                const TextStyle(fontSize: 10, height: 1.2),
           ),
           hint: Text(hint,
               style: TextStyle(
@@ -863,100 +955,6 @@ class _CreatePlayerScreenState extends State<CreatePlayerPanel>
           items: items,
           onChanged: onChanged,
         ),
-      ),
-    );
-  }
-
-  // ================= DATE FIELD =================
-  Widget _buildDateField() {
-    return GestureDetector(
-      onTap: _pickDateOfBirth,
-      child: AbsorbPointer(
-        child: TextFormField(
-          controller: _dobController,
-          style: const TextStyle(color: Colors.white, fontSize: 13),
-          validator: (v) => _selectedDateOfBirth == null
-              ? 'Please select date of birth'
-              : null,
-          decoration: InputDecoration(
-            hintText: 'Select date of birth',
-            hintStyle:
-                TextStyle(color: Colors.grey.shade600, fontSize: 13),
-            prefixIcon: Icon(Icons.calendar_today_rounded,
-                color: Colors.grey.shade600, size: 17),
-            suffixIcon: Icon(Icons.keyboard_arrow_down_rounded,
-                color: Colors.grey.shade500, size: 18),
-            filled: true,
-            fillColor: Colors.white.withOpacity(0.05),
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14, vertical: 13),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(11),
-              borderSide:
-                  BorderSide(color: Colors.white.withOpacity(0.08)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(11),
-              borderSide:
-                  BorderSide(color: Colors.white.withOpacity(0.08)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(11),
-              borderSide: BorderSide(
-                  color: AppColors.primaryColor.withOpacity(0.55)),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(11),
-              borderSide: const BorderSide(color: Color(0xFFE57373)),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(11),
-              borderSide: const BorderSide(color: Color(0xFFE57373)),
-            ),
-            errorStyle: const TextStyle(fontSize: 10, height: 1.2),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ================= SUBMIT BUTTON =================
-  Widget _buildSubmitButton() {
-    return SizedBox(
-      height: 48,
-      child: ElevatedButton(
-        onPressed: _isSubmitting ? null : _submitForm,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primaryColor,
-          disabledBackgroundColor:
-              AppColors.primaryColor.withOpacity(0.35),
-          foregroundColor: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
-        ),
-        child: _isSubmitting
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white),
-              )
-            : const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.person_add_rounded, size: 17),
-                  SizedBox(width: 8),
-                  Text(
-                    'Register Player',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                ],
-              ),
       ),
     );
   }
