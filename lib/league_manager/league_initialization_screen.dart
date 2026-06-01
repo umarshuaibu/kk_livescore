@@ -1772,7 +1772,7 @@ class _StandingsTab extends StatelessWidget {
                       const SizedBox(width: 24),
                       const Expanded(flex: 4, child: Text('Team', style: TextStyle(color: Color(0xFF6B7280), fontSize: 11, fontWeight: FontWeight.w600))),
                       ..._standingColHeader(['P','W','D','L','GF','GA','GD','Pts']),
-                      const SizedBox(width: 32),
+                      const SizedBox(width: 64), // widened to accommodate both icons
                     ],
                   ),
                 ),
@@ -1808,7 +1808,7 @@ class _StandingsTab extends StatelessWidget {
   }
 }
 
-// ── Standing row with modify button ──
+// ── Standing row with modify + delete buttons ──
 class _StandingRow extends StatefulWidget {
   final int rank;
   final String teamName;
@@ -1878,6 +1878,7 @@ class _StandingRowState extends State<_StandingRow> {
             ..._statCell(s['goalsAgainst']),
             ..._statCell(s['goalDifference']),
             ..._statCell(s['points'], bold: true, color: AppColors.primaryColor2),
+            // ── Edit button ──
             SizedBox(
               width: 32,
               child: GestureDetector(
@@ -1885,6 +1886,16 @@ class _StandingRowState extends State<_StandingRow> {
                 child: Icon(Icons.edit_rounded,
                     size: 14,
                     color: _hovered ? AppColors.whiteColor : Colors.grey.shade700),
+              ),
+            ),
+            // ── Delete button ──
+            SizedBox(
+              width: 32,
+              child: GestureDetector(
+                onTap: () => _confirmDelete(context),
+                child: Icon(Icons.delete_outline_rounded,
+                    size: 14,
+                    color: _hovered ? _kRed : Colors.grey.shade700),
               ),
             ),
           ],
@@ -1922,6 +1933,178 @@ class _StandingRowState extends State<_StandingRow> {
           widget.onUpdated();
         },
       ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: _kSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 20, 16, 16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.04),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+                  border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.07))),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                          color: _kRed.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(Icons.delete_outline_rounded, color: _kRed, size: 18),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text('Delete Standing',
+                          style: TextStyle(
+                              color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+                    ),
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
+                        width: 32, height: 32,
+                        decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.close_rounded, color: Colors.white60, size: 16),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Body
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    RichText(
+                      textAlign: TextAlign.center,
+                      text: TextSpan(
+                        style: TextStyle(color: Colors.grey.shade400, fontSize: 13, height: 1.5),
+                        children: [
+                          const TextSpan(text: 'Are you sure you want to delete the standing for '),
+                          TextSpan(
+                            text: widget.teamName,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                          ),
+                          const TextSpan(text: '? This action cannot be undone.'),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        // Cancel
+                        Expanded(
+                          child: SizedBox(
+                            height: 44,
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(context),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: Colors.white.withOpacity(0.12)),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: const Text('Cancel',
+                                  style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w500)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Delete
+                        Expanded(
+                          child: SizedBox(
+                            height: 44,
+                            child: _DeleteConfirmButton(
+                              docId: widget.docId,
+                              leagueId: widget.leagueId,
+                              onDeleted: () {
+                                Navigator.pop(context);
+                                widget.onUpdated();
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Stateful delete button to handle loading state ──
+class _DeleteConfirmButton extends StatefulWidget {
+  final String docId;
+  final String leagueId;
+  final VoidCallback onDeleted;
+
+  const _DeleteConfirmButton({
+    required this.docId,
+    required this.leagueId,
+    required this.onDeleted,
+  });
+
+  @override
+  State<_DeleteConfirmButton> createState() => _DeleteConfirmButtonState();
+}
+
+class _DeleteConfirmButtonState extends State<_DeleteConfirmButton> {
+  bool _deleting = false;
+
+  Future<void> _delete() async {
+    setState(() => _deleting = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('leagues').doc(widget.leagueId)
+          .collection('standings').doc(widget.docId)
+          .delete();
+      widget.onDeleted();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to delete: $e'),
+          backgroundColor: _kRed.withOpacity(0.9),
+          behavior: SnackBarBehavior.floating,
+        ));
+        setState(() => _deleting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: _deleting ? null : _delete,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _kRed,
+        disabledBackgroundColor: _kRed.withOpacity(0.35),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: _deleting
+          ? const SizedBox(
+              width: 18, height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+          : const Text('Delete',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
     );
   }
 }
@@ -2138,7 +2321,6 @@ class _EditStandingDialogState extends State<_EditStandingDialog> {
     );
   }
 }
-
 // ════════════════════════════════════════════════════════════════════
 //   INFO TAB
 // ════════════════════════════════════════════════════════════════════
